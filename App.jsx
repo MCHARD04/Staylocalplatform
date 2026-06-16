@@ -150,7 +150,11 @@ const LANDLORD_STATUS_META = {
   rejected: { label:"Rejected", bg:"#FEE2E2", color:C.error },
 };
 
-const PAYMENTS = ["AzamPesa","M-Pesa","Tigo Pesa","Airtel Money","HaloPesa"];
+const PAYMENTS = ["AzamPesa","M-Pesa","Tigo Pesa","Airtel Money","HaloPesa","Kadi (Visa/Mastercard)"];
+const isCardMethod = m => m === "Kadi (Visa/Mastercard)";
+const fmtCardNum = v => v.replace(/\D/g,'').slice(0,16).replace(/(.{4})(?=.)/g,'$1 ');
+const fmtExpiry  = v => { const d=v.replace(/\D/g,'').slice(0,4); return d.length>2?d.slice(0,2)+'/'+d.slice(2):d; };
+const cardBrand  = n => { const d=n.replace(/\s/g,'')[0]; return d==='4'?'VISA':d==='5'?'MC':d==='3'?'AMEX':'CARD'; };
 const AREAS = ["All Areas","Masaki","Kariakoo","Mikocheni","Oyster Bay","Sinza","Upanga","Mbezi Beach","Tegeta","Kijitonyama"];
 const AMENITY_ICONS = { WiFi:<Wifi size={13}/>, AC:<Wind size={13}/>, Kitchen:<ChefHat size={13}/>, Pool:<Waves size={13}/>, Gym:<Dumbbell size={13}/>, Parking:<Car size={13}/>, Garden:<Trees size={13}/>, Security:<Shield size={13}/>, "Beach Access":<Waves size={13}/>, "City View":<Building size={13}/>, Washer:<Zap size={13}/>, Restaurant:<ChefHat size={13}/>};
 const CATEGORIES = [
@@ -746,6 +750,10 @@ function PropertyPage({ prop, saved, toggleSaved, user, bookings, setBookings, s
   const [guests, setGuests] = useState(1);
   const [payMethod, setPayMethod] = useState("AzamPesa");
   const [phone, setPhone] = useState("");
+  const [cardNum, setCardNum] = useState("");
+  const [cardName, setCardName] = useState("");
+  const [cardExpiry, setCardExpiry] = useState("");
+  const [cardCVV, setCardCVV] = useState("");
   const [loading, setLoading] = useState(false);
   const [txnId, setTxnId] = useState("");
   const [newRev, setNewRev] = useState({ rating:5, comment:"" });
@@ -760,12 +768,23 @@ function PropertyPage({ prop, saved, toggleSaved, user, bookings, setBookings, s
     setStep("payment");
   };
   const handlePay = async () => {
-    if (!phone||phone.length<9) { showToast("Weka namba sahihi ya simu (07XXXXXXXX)","error"); return; }
+    const isCard = isCardMethod(payMethod);
+    if (isCard) {
+      if (cardNum.replace(/\s/g,'').length < 16) { showToast("Weka namba sahihi ya kadi (digits 16)","error"); return; }
+      if (!cardName.trim()) { showToast("Weka jina linaloonekana kwenye kadi","error"); return; }
+      if (cardExpiry.length < 5) { showToast("Weka tarehe ya kuisha (MM/YY)","error"); return; }
+      if (cardCVV.length < 3) { showToast("Weka CVV sahihi (digits 3)","error"); return; }
+    } else {
+      if (!phone||phone.length<9) { showToast("Weka namba sahihi ya simu (07XXXXXXXX)","error"); return; }
+    }
     setLoading(true);
     try {
+      const body = isCard
+        ? { userId: user?.id, amount: total, provider: "CARD", cardNum: cardNum.replace(/\s/g,''), cardName, cardExpiry, cardBrand: cardBrand(cardNum) }
+        : { userId: user?.id, amount: total, phone, provider: payMethod };
       const res = await fetch("/api/payment/initiate", {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ userId: user?.id, amount: total, phone, provider: payMethod }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (data.success) { setTxnId(data.transactionId||""); setStep("confirm"); }
@@ -953,28 +972,96 @@ function PropertyPage({ prop, saved, toggleSaved, user, bookings, setBookings, s
               <div style={{ background:"white", borderRadius:20, padding:26, boxShadow:"0 8px 32px rgba(44,24,16,.1)" }}>
                 <button onClick={()=>setStep("details")} style={{ display:"flex", alignItems:"center", gap:4, background:"none", border:"none", cursor:"pointer", color:C.primary, fontWeight:600, marginBottom:18, fontSize:".83rem" }}><ChevronLeft size={15}/>Back</button>
                 <h3 style={{ fontFamily:"Georgia,serif", fontWeight:700, fontSize:"1.1rem", color:C.dark, marginBottom:18 }}>Choose Payment</h3>
-                <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:18 }}>
-                  {PAYMENTS.map(m=>(
-                    <label key={m} style={{ display:"flex", alignItems:"center", gap:9, padding:"11px 13px", border:`2px solid ${payMethod===m?C.primary:C.border}`, borderRadius:10, cursor:"pointer", background:payMethod===m?"rgba(196,98,45,.04)":"white", transition:"all .2s" }}>
+                {/* PAYMENT METHOD PILLS */}
+                <div style={{ display:"flex", flexDirection:"column", gap:7, marginBottom:18 }}>
+                  {/* Mobile money */}
+                  <div style={{ fontSize:".65rem", fontWeight:800, color:C.muted, textTransform:"uppercase", letterSpacing:.8, marginBottom:2 }}>Mobile Money</div>
+                  {PAYMENTS.filter(m=>!isCardMethod(m)).map(m=>(
+                    <label key={m} style={{ display:"flex", alignItems:"center", gap:9, padding:"10px 13px", border:`2px solid ${payMethod===m?C.primary:C.border}`, borderRadius:10, cursor:"pointer", background:payMethod===m?C.primaryFaint:"white", transition:"all .15s" }}>
                       <input type="radio" checked={payMethod===m} onChange={()=>setPayMethod(m)} style={{ accentColor:C.primary }}/>
-                      <CreditCard size={15} color={payMethod===m?C.primary:C.muted}/>
-                      <span style={{ fontSize:".85rem", fontWeight:payMethod===m?600:400, color:payMethod===m?C.primary:C.brown }}>{m}</span>
+                      <Phone size={14} color={payMethod===m?C.primary:C.muted}/>
+                      <span style={{ fontSize:".84rem", fontWeight:payMethod===m?700:400, color:payMethod===m?C.primary:C.brown }}>{m}</span>
                     </label>
                   ))}
+                  {/* Card */}
+                  <div style={{ fontSize:".65rem", fontWeight:800, color:C.muted, textTransform:"uppercase", letterSpacing:.8, margin:"6px 0 2px" }}>Kadi ya Benki</div>
+                  <label style={{ display:"flex", alignItems:"center", gap:9, padding:"10px 13px", border:`2px solid ${isCardMethod(payMethod)?C.primary:C.border}`, borderRadius:10, cursor:"pointer", background:isCardMethod(payMethod)?C.primaryFaint:"white", transition:"all .15s" }}>
+                    <input type="radio" checked={isCardMethod(payMethod)} onChange={()=>setPayMethod("Kadi (Visa/Mastercard)")} style={{ accentColor:C.primary }}/>
+                    <CreditCard size={14} color={isCardMethod(payMethod)?C.primary:C.muted}/>
+                    <span style={{ fontSize:".84rem", fontWeight:isCardMethod(payMethod)?700:400, color:isCardMethod(payMethod)?C.primary:C.brown, flex:1 }}>Visa / Mastercard</span>
+                    {/* Card brand logos */}
+                    <span style={{ display:"flex", gap:4 }}>
+                      <span style={{ background:"#1A1F71", color:"white", fontSize:".55rem", fontWeight:900, padding:"2px 5px", borderRadius:3, letterSpacing:.5 }}>VISA</span>
+                      <span style={{ display:"flex", position:"relative", width:20, height:14 }}>
+                        <span style={{ position:"absolute", left:0, width:14, height:14, borderRadius:"50%", background:"#EB001B", opacity:.9 }}/>
+                        <span style={{ position:"absolute", left:6, width:14, height:14, borderRadius:"50%", background:"#F79E1B", opacity:.9 }}/>
+                      </span>
+                    </span>
+                  </label>
                 </div>
-                <div style={{ marginBottom:14 }}>
-                  <label style={{ display:"block", fontSize:".68rem", fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:.5, marginBottom:5 }}>Phone Number</label>
-                  <div style={{ position:"relative" }}>
-                    <Phone size={14} style={{ position:"absolute", left:11, top:"50%", transform:"translateY(-50%)", color:C.muted }}/>
-                    <input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="07XXXXXXXX" style={{ width:"100%", padding:"10px 12px 10px 34px", border:`1.5px solid ${C.border}`, borderRadius:9, fontSize:".88rem", outline:"none", boxSizing:"border-box", fontFamily:"inherit" }}/>
+
+                {/* INPUT FIELDS — phone or card */}
+                {!isCardMethod(payMethod) ? (
+                  <div style={{ marginBottom:14 }}>
+                    <label style={{ display:"block", fontSize:".68rem", fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:.5, marginBottom:5 }}>Namba ya Simu</label>
+                    <div style={{ position:"relative" }}>
+                      <Phone size={14} style={{ position:"absolute", left:11, top:"50%", transform:"translateY(-50%)", color:C.muted }}/>
+                      <input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="07XXXXXXXX" style={{ width:"100%", padding:"10px 12px 10px 34px", border:`1.5px solid ${C.border}`, borderRadius:9, fontSize:".88rem", outline:"none", boxSizing:"border-box", fontFamily:"inherit" }}/>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div style={{ marginBottom:14, display:"flex", flexDirection:"column", gap:10 }}>
+                    {/* Card preview strip */}
+                    <div style={{ background:`linear-gradient(135deg,${C.dark},${C.darkMid})`, borderRadius:12, padding:"14px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                      <div>
+                        <div style={{ color:"rgba(255,255,255,.5)", fontSize:".6rem", marginBottom:3 }}>CARD NUMBER</div>
+                        <div style={{ color:"white", fontFamily:"monospace", fontSize:".9rem", letterSpacing:2 }}>{cardNum||"•••• •••• •••• ••••"}</div>
+                      </div>
+                      <div style={{ textAlign:"right" }}>
+                        {cardBrand(cardNum)==="VISA" && <span style={{ background:"white", color:"#1A1F71", fontSize:".6rem", fontWeight:900, padding:"2px 6px", borderRadius:3 }}>VISA</span>}
+                        {cardBrand(cardNum)==="MC"   && <span style={{ display:"flex", gap:-4 }}><span style={{ width:16,height:16,borderRadius:"50%",background:"#EB001B",display:"inline-block" }}/><span style={{ width:16,height:16,borderRadius:"50%",background:"#F79E1B",display:"inline-block",marginLeft:-6 }}/></span>}
+                        {cardBrand(cardNum)==="AMEX" && <span style={{ color:"rgba(255,255,255,.7)", fontSize:".65rem", fontWeight:700 }}>AMEX</span>}
+                        {cardBrand(cardNum)==="CARD" && <CreditCard size={20} color="rgba(255,255,255,.4)"/>}
+                      </div>
+                    </div>
+                    {/* Card number */}
+                    <div>
+                      <label style={{ display:"block", fontSize:".65rem", fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:.5, marginBottom:4 }}>Namba ya Kadi</label>
+                      <input value={cardNum} onChange={e=>setCardNum(fmtCardNum(e.target.value))} placeholder="1234 5678 9012 3456" maxLength={19} style={{ width:"100%", padding:"10px 12px", border:`1.5px solid ${C.border}`, borderRadius:9, fontSize:".88rem", outline:"none", boxSizing:"border-box", fontFamily:"monospace", letterSpacing:1 }}/>
+                    </div>
+                    {/* Name */}
+                    <div>
+                      <label style={{ display:"block", fontSize:".65rem", fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:.5, marginBottom:4 }}>Jina kwenye Kadi</label>
+                      <input value={cardName} onChange={e=>setCardName(e.target.value.toUpperCase())} placeholder="JOHN MWAMBA" style={{ width:"100%", padding:"10px 12px", border:`1.5px solid ${C.border}`, borderRadius:9, fontSize:".88rem", outline:"none", boxSizing:"border-box", fontFamily:"inherit", textTransform:"uppercase" }}/>
+                    </div>
+                    {/* Expiry + CVV */}
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                      <div>
+                        <label style={{ display:"block", fontSize:".65rem", fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:.5, marginBottom:4 }}>Tarehe (MM/YY)</label>
+                        <input value={cardExpiry} onChange={e=>setCardExpiry(fmtExpiry(e.target.value))} placeholder="MM/YY" maxLength={5} style={{ width:"100%", padding:"10px 12px", border:`1.5px solid ${C.border}`, borderRadius:9, fontSize:".88rem", outline:"none", boxSizing:"border-box", fontFamily:"monospace" }}/>
+                      </div>
+                      <div>
+                        <label style={{ display:"block", fontSize:".65rem", fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:.5, marginBottom:4 }}>CVV</label>
+                        <input value={cardCVV} onChange={e=>setCardCVV(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="•••" maxLength={4} type="password" style={{ width:"100%", padding:"10px 12px", border:`1.5px solid ${C.border}`, borderRadius:9, fontSize:".88rem", outline:"none", boxSizing:"border-box", fontFamily:"monospace" }}/>
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:".72rem", color:C.muted }}>
+                      <Shield size={11} color={C.success}/> Malipo yako yanalindwa kwa SSL encryption
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ background:C.bg, borderRadius:10, padding:13, marginBottom:16 }}>
                   <div style={{ fontWeight:700, color:C.dark, fontSize:".88rem", marginBottom:4 }}>{prop.title} · {nights} nights</div>
                   <div style={{ fontFamily:"Georgia,serif", fontSize:"1.35rem", fontWeight:900, color:C.primary }}>TZS {fmt(total)}</div>
                 </div>
                 <button onClick={handlePay} disabled={loading} className="btn-press" style={{ width:"100%", padding:"13px", background:loading?C.muted:C.primary, color:"white", border:"none", borderRadius:11, fontWeight:700, fontSize:".93rem", cursor:loading?"not-allowed":"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:7 }}>
-                  {loading?<><div style={{ width:16, height:16, border:"2px solid rgba(255,255,255,.4)", borderTopColor:"white", borderRadius:"50%", animation:"spin 1s linear infinite" }}/> Sending STK Push…</>:<><Phone size={15}/> Send STK Push</>}
+                  {loading
+                    ? <><div style={{ width:16, height:16, border:"2px solid rgba(255,255,255,.4)", borderTopColor:"white", borderRadius:"50%", animation:"spin 1s linear infinite" }}/> Inachakata…</>
+                    : isCardMethod(payMethod)
+                      ? <><CreditCard size={15}/> Lipa kwa Kadi</>
+                      : <><Phone size={15}/> Tuma STK Push</>
+                  }
                 </button>
               </div>
             )}
@@ -985,8 +1072,8 @@ function PropertyPage({ prop, saved, toggleSaved, user, bookings, setBookings, s
                   <div style={{ width:58, height:58, background:"#DCFCE7", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 12px" }}>
                     <Phone size={24} color={C.success}/>
                   </div>
-                  <h3 style={{ fontFamily:"Georgia,serif", fontWeight:700, fontSize:"1.1rem", color:C.dark, marginBottom:6 }}>STK Push Sent!</h3>
-                  <p style={{ color:C.muted, fontSize:".82rem" }}>Check <strong>{phone}</strong> and enter your <strong>{payMethod}</strong> PIN</p>
+                  <h3 style={{ fontFamily:"Georgia,serif", fontWeight:700, fontSize:"1.1rem", color:C.dark, marginBottom:6 }}>{isCardMethod(payMethod)?"Kadi Imethibitishwa!":"STK Push Sent!"}</h3>
+                  <p style={{ color:C.muted, fontSize:".82rem" }}>{isCardMethod(payMethod)?<>Kadi yako <strong>****{cardNum.replace(/\s/g,'').slice(-4)}</strong> imepokelewa. Thibitisha booking.</>:<>Check <strong>{phone}</strong> and enter your <strong>{payMethod}</strong> PIN</>}</p>
                 </div>
                 <div style={{ background:C.bg, borderRadius:10, padding:14, marginBottom:18 }}>
                   <div style={{ fontWeight:600, fontSize:".85rem", color:C.dark, marginBottom:4 }}>{prop.title}</div>

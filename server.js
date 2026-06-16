@@ -242,10 +242,26 @@ app.post('/api/reviews', (req, res) => {
   res.json({ success: true, review });
 });
 
-// ─── AZAMPESA PAYMENT ─────────────────────────────────────────
+// ─── PAYMENT INITIATE (Mobile Money + Card) ───────────────────
 app.post('/api/payment/initiate', async (req, res) => {
-  const { bookingId, userId, amount, phone, provider = 'AzamPesa' } = req.body;
+  const { bookingId, userId, amount, phone, provider = 'AzamPesa', cardNum, cardName, cardExpiry, cardBrand } = req.body;
   const externalId = `staylocal-${userId}-${Date.now()}`;
+  const isCard = provider === 'CARD';
+
+  // ── CARD PAYMENT ──────────────────────────────────────────────
+  if (isCard) {
+    const txnId = `CARD${Date.now()}`;
+    const last4 = (cardNum||'').slice(-4);
+    paymentTransactions.push({
+      id: nextIds.payment++, bookingId, userId: parseInt(userId || 0),
+      amount, phone: null, provider: cardBrand || 'CARD',
+      cardLast4: last4, cardName, cardExpiry,
+      status: 'completed', azamTransactionId: txnId,
+      externalId, mode: 'card', createdAt: new Date().toISOString()
+    });
+    return res.json({ success: true, transactionId: txnId, status: 'completed', message: `Kadi ****${last4} imethibitishwa` });
+  }
+
   const providerCode = PROVIDER_MAP[provider] || 'AZAMPESA';
 
   // Kama credentials hazijawekwa, simulate kwa majaribio
