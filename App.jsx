@@ -7,7 +7,8 @@ import {
   Trophy, SlidersHorizontal, Plus, Minus, Clock, Globe, Building,
   AlertCircle, Check, Trash2, Camera, Upload, FileText, TrendingUp,
   LayoutDashboard, Settings, ChevronDown, Menu, Zap, Award, Image,
-  MessageSquare, DollarSign, BarChart3, Send, RefreshCw
+  MessageSquare, DollarSign, BarChart3, Send, RefreshCw,
+  LogIn, UserPlus, Activity
 } from "lucide-react";
 
 // ─── DESIGN TOKENS ───────────────────────────────────────
@@ -135,15 +136,12 @@ const REVIEWS_DB = {
   6: [{ id:6, name:"James K.", avatar:"JK", rating:4, comment:"Great location for business. Close to everything. Clean and well managed.", date:"May 2026" }],
 };
 
-const WC_MATCHES = [
-  { home:"Spain", away:"Cape Verde", hf:"🇪🇸", af:"🇨🇻", grp:"H", hs:2, as:0, st:"LIVE" },
-  { home:"Belgium", away:"Egypt", hf:"🇧🇪", af:"🇪🇬", grp:"G", hs:null, as:null, st:"18:00" },
-  { home:"Saudi Arabia", away:"Uruguay", hf:"🇸🇦", af:"🇺🇾", grp:"H", hs:null, as:null, st:"22:00" },
-  { home:"Germany", away:"Curaçao", hf:"🇩🇪", af:"🇨🇼", grp:"E", hs:7, as:1, st:"FT" },
-  { home:"Sweden", away:"Tunisia", hf:"🇸🇪", af:"🇹🇳", grp:"F", hs:5, as:1, st:"FT" },
-  { home:"Ivory Coast", away:"Ecuador", hf:"🇨🇮", af:"🇪🇨", grp:"E", hs:1, as:0, st:"FT" },
-  { home:"Netherlands", away:"Japan", hf:"🇳🇱", af:"🇯🇵", grp:"F", hs:2, as:2, st:"FT" },
-];
+const WC_BADGE = () => (
+  <div style={{ display:"flex", alignItems:"center", gap:5, padding:"3px 10px", background:"linear-gradient(90deg,#1a1a2e,#16213e)", borderRadius:20, flexShrink:0 }}>
+    <span style={{ fontSize:"13px" }}>⚽</span>
+    <span style={{ fontSize:".62rem", fontWeight:800, color:"white", letterSpacing:.8, whiteSpace:"nowrap" }}>FIFA WC 2026</span>
+  </div>
+);
 
 const LANDLORD_STATUS_META = {
   active: { label:"Active Host", bg:"#DCFCE7", color:C.success },
@@ -233,10 +231,11 @@ export default function App() {
 
   const nav = [
     { label:"Home", p:"home", icon:<Home size={15}/> },
+    { label:"Properties", p:"properties", icon:<Building size={15}/> },
     { label:"Saved", p:"saved", icon:<Heart size={15}/> },
     { label:"Bookings", p:"bookings", icon:<BookOpen size={15}/> },
     ...(user?.role==="landlord" ? [{ label:"Dashboard", p:"dashboard", icon:<LayoutDashboard size={15}/> }] : []),
-    ...(user?.role==="admin" ? [{ label:"Admin", p:"admin", icon:<BarChart3 size={15}/> }] : []),
+    ...(user?.role==="admin" ? [{ label:"Admin Panel", p:"admin", icon:<BarChart3 size={15}/> }] : []),
   ];
 
   return (
@@ -282,10 +281,8 @@ export default function App() {
         }
       `}</style>
 
-      <WCTicker />
-
       {/* NAV */}
-      <nav style={{ position:"sticky", top:34, zIndex:100, background:"rgba(251,246,241,.96)", backdropFilter:"blur(14px)", borderBottom:`1px solid ${C.border}`, height:62, display:"flex", alignItems:"center", padding:"0 4%", gap:16 }}>
+      <nav style={{ position:"sticky", top:0, zIndex:100, background:"rgba(251,246,241,.96)", backdropFilter:"blur(14px)", borderBottom:`1px solid ${C.border}`, height:62, display:"flex", alignItems:"center", padding:"0 4%", gap:16 }}>
         <button onClick={()=>setPage("home")} style={{ display:"flex", alignItems:"center", gap:9, background:"none", border:"none", cursor:"pointer", flexShrink:0 }}>
           <div style={{ width:36, height:36, background:C.primary, borderRadius:9, display:"flex", alignItems:"center", justifyContent:"center" }}>
             <Home size={18} color="white"/>
@@ -300,6 +297,8 @@ export default function App() {
             </button>
           ))}
         </div>
+
+        <WC_BADGE/>
 
         <div style={{ marginLeft:"auto", display:"flex", gap:10, alignItems:"center" }}>
           {user ? (
@@ -368,6 +367,7 @@ export default function App() {
         {page==="dashboard" && <LandlordDashboard user={user} props={PROPS.filter(p=>p.hostId===2)} bookings={bookings} showToast={showToast} setPage={setPage}/>}
         {page==="list" && <ListPropertyPage user={user} setPage={setPage} showToast={showToast} setAuthMode={setAuthMode} propertyRequests={propertyRequests} setPropertyRequests={setPropertyRequests}/>}
         {page==="admin" && <AdminPage propertyRequests={propertyRequests} setPropertyRequests={setPropertyRequests} showToast={showToast} user={user} setPage={setPage}/>}
+        {page==="properties" && <AllPropertiesPage props={PROPS} saved={saved} toggleSaved={toggleSaved} openProp={p=>{setSelectedProp(p);setPage("property");}} setPage={setPage}/>}
       </div>
 
       {/* TOASTS */}
@@ -382,27 +382,6 @@ export default function App() {
   );
 }
 
-// ─── WORLD CUP TICKER ─────────────────────────────────────
-function WCTicker() {
-  const items = WC_MATCHES.map(m =>
-    `${m.hf} ${m.home} ${m.st==="FT"||m.st==="LIVE"?`${m.hs}–${m.as}`:"vs"} ${m.away} ${m.af}  ·  Group ${m.grp}  ${m.st==="LIVE"?"🔴 LIVE":m.st}`
-  ).join("          ◆          ");
-  const doubled = `${items}          ◆          ${items}`;
-
-  return (
-    <div style={{ background:"#0f0f1a", height:34, overflow:"hidden", display:"flex", alignItems:"center" }}>
-      <div style={{ background:C.primary, padding:"0 14px", height:"100%", display:"flex", alignItems:"center", gap:6, flexShrink:0, zIndex:2 }}>
-        <Trophy size={12} color="white"/>
-        <span style={{ fontSize:".68rem", fontWeight:800, letterSpacing:1.2, color:"white", whiteSpace:"nowrap" }}>WC 2026</span>
-      </div>
-      <div style={{ overflow:"hidden", flex:1 }}>
-        <div style={{ display:"inline-block", whiteSpace:"nowrap", animation:"ticker 40s linear infinite", fontSize:".73rem", color:"rgba(255,255,255,.8)", fontWeight:500, padding:"0 24px" }}>
-          {doubled}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─── HOME PAGE ────────────────────────────────────────────
 function HomePage({ props, saved, toggleSaved, openProp, user, showToast, setPage, setAuthMode }) {
@@ -570,9 +549,21 @@ function HomePage({ props, saved, toggleSaved, openProp, user, showToast, setPag
             <button onClick={()=>{setQ("");setArea("All Areas");setType("All");setMaxPrice(300000);setCategory("all");}} style={{ marginTop:8, padding:"9px 20px", background:C.primary, color:"white", border:"none", borderRadius:8, cursor:"pointer", fontWeight:600 }}>Clear filters</button>
           </div>
         ) : (
-          <div className="props-grid" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:26 }}>
-            {filtered.map((p,i) => <FadeIn key={p.id} delay={i*0.07}><PropCard prop={p} saved={saved} toggleSaved={toggleSaved} onClick={()=>openProp(p)}/></FadeIn>)}
-          </div>
+          <>
+            <div className="props-grid" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:26 }}>
+              {filtered.slice(0,6).map((p,i) => <FadeIn key={p.id} delay={i*0.07}><PropCard prop={p} saved={saved} toggleSaved={toggleSaved} onClick={()=>openProp(p)}/></FadeIn>)}
+            </div>
+            {filtered.length > 6 && (
+              <FadeIn>
+                <div style={{ textAlign:"center", marginTop:44 }}>
+                  <p style={{ color:C.muted, fontSize:".88rem", marginBottom:14 }}>Showing 6 of <strong>{filtered.length}</strong> verified properties</p>
+                  <button onClick={()=>setPage("properties")} className="btn-press" style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"13px 32px", background:C.primary, color:"white", border:"none", borderRadius:11, fontWeight:700, fontSize:".93rem", cursor:"pointer", boxShadow:`0 4px 16px ${C.primary}44` }}>
+                    See All Properties <ArrowRight size={16}/>
+                  </button>
+                </div>
+              </FadeIn>
+            )}
+          </>
         )}
       </div>
 
@@ -590,6 +581,111 @@ function HomePage({ props, saved, toggleSaved, openProp, user, showToast, setPag
       {/* LIST PROPERTY CTA */}
       <ListCTA setPage={setPage} user={user} setAuthMode={setAuthMode}/>
       {/* FOOTER */}
+      <Footer setPage={setPage}/>
+    </div>
+  );
+}
+
+// ─── ALL PROPERTIES PAGE ─────────────────────────────────
+function AllPropertiesPage({ props, saved, toggleSaved, openProp, setPage }) {
+  const [q, setQ] = useState("");
+  const [type, setType] = useState("All");
+  const [sort, setSort] = useState("rating");
+  const [maxPrice, setMaxPrice] = useState(300000);
+  const [category, setCategory] = useState("all");
+
+  const filtered = props
+    .filter(p => {
+      const cat = CATEGORIES.find(c => c.id === category);
+      if (cat && !cat.test(p)) return false;
+      if (type !== "All" && p.type !== type) return false;
+      if (p.price > maxPrice) return false;
+      if (q && !p.title.toLowerCase().includes(q.toLowerCase()) && !p.location.toLowerCase().includes(q.toLowerCase())) return false;
+      return true;
+    })
+    .sort((a,b) => sort==="price_asc" ? a.price-b.price : sort==="price_desc" ? b.price-a.price : b.rating-a.rating);
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.bg }}>
+      {/* PAGE HEADER */}
+      <div style={{ background:`linear-gradient(135deg, ${C.dark} 0%, ${C.darkMid} 100%)`, padding:"44px 4% 36px" }}>
+        <div style={{ maxWidth:1200, margin:"0 auto" }}>
+          <button onClick={()=>setPage("home")} style={{ display:"flex", alignItems:"center", gap:5, background:"rgba(255,255,255,.12)", border:"1px solid rgba(255,255,255,.2)", borderRadius:8, padding:"6px 12px", color:"rgba(255,255,255,.8)", cursor:"pointer", fontSize:".8rem", marginBottom:20 }}>
+            <ChevronLeft size={14}/> Back to Home
+          </button>
+          <span style={{ fontSize:".68rem", fontWeight:800, textTransform:"uppercase", letterSpacing:2, color:C.primaryLight, display:"block", marginBottom:8 }}>All Listings</span>
+          <h1 style={{ fontFamily:"Georgia,serif", fontSize:"clamp(1.6rem,3vw,2.4rem)", color:"white", fontWeight:700, marginBottom:8 }}>
+            Browse All Properties
+          </h1>
+          <p style={{ color:"rgba(255,255,255,.55)", fontSize:".9rem" }}>{props.length} verified properties in Dar es Salaam</p>
+
+          {/* SEARCH BAR */}
+          <div style={{ marginTop:24, position:"relative", maxWidth:560 }}>
+            <Search size={16} style={{ position:"absolute", left:14, top:"50%", transform:"translateY(-50%)", color:"rgba(255,255,255,.4)" }}/>
+            <input
+              value={q} onChange={e=>setQ(e.target.value)}
+              placeholder="Search by name or location…"
+              style={{ width:"100%", padding:"12px 16px 12px 42px", background:"rgba(255,255,255,.12)", border:"1px solid rgba(255,255,255,.2)", borderRadius:11, color:"white", fontSize:".9rem", outline:"none", boxSizing:"border-box", fontFamily:"inherit" }}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth:1200, margin:"0 auto", padding:"32px 4%" }}>
+        {/* FILTERS ROW */}
+        <div style={{ display:"flex", gap:12, marginBottom:24, flexWrap:"wrap", alignItems:"center" }}>
+          {/* Category pills */}
+          <div style={{ display:"flex", gap:8, overflowX:"auto", flex:1, paddingBottom:2 }}>
+            {CATEGORIES.map(cat=>(
+              <button key={cat.id} onClick={()=>setCategory(cat.id)} style={{ display:"flex", alignItems:"center", gap:5, padding:"7px 14px", borderRadius:20, border:`1.5px solid ${category===cat.id?C.primary:C.border}`, background:category===cat.id?C.primaryFaint:"white", color:category===cat.id?C.primary:C.brown, cursor:"pointer", fontSize:".78rem", fontWeight:category===cat.id?700:500, whiteSpace:"nowrap", flexShrink:0, transition:"all .15s" }}>
+                {cat.icon}{cat.label}
+              </button>
+            ))}
+          </div>
+          {/* Sort + Type */}
+          <div style={{ display:"flex", gap:8, flexShrink:0 }}>
+            <select value={type} onChange={e=>setType(e.target.value)} style={{ padding:"8px 12px", border:`1.5px solid ${C.border}`, borderRadius:8, fontSize:".8rem", background:"white", outline:"none", color:C.dark, cursor:"pointer" }}>
+              <option value="All">All Types</option>
+              <option value="Entire Home">Entire Home</option>
+              <option value="Private Room">Private Room</option>
+            </select>
+            <select value={sort} onChange={e=>setSort(e.target.value)} style={{ padding:"8px 12px", border:`1.5px solid ${C.border}`, borderRadius:8, fontSize:".8rem", background:"white", outline:"none", color:C.dark, cursor:"pointer" }}>
+              <option value="rating">Top Rated</option>
+              <option value="price_asc">Price ↑</option>
+              <option value="price_desc">Price ↓</option>
+            </select>
+          </div>
+        </div>
+
+        {/* RESULTS COUNT */}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20 }}>
+          <p style={{ color:C.muted, fontSize:".83rem" }}>
+            <strong style={{ color:C.dark }}>{filtered.length}</strong> properties found
+          </p>
+          <p style={{ fontSize:".75rem", color:C.muted }}>
+            Max price: <strong>TZS {maxPrice.toLocaleString()}</strong>
+            <input type="range" min={20000} max={300000} step={5000} value={maxPrice} onChange={e=>setMaxPrice(+e.target.value)}
+              style={{ marginLeft:10, accentColor:C.primary, verticalAlign:"middle", width:80 }}/>
+          </p>
+        </div>
+
+        {/* GRID */}
+        {filtered.length === 0 ? (
+          <div style={{ textAlign:"center", padding:"80px 0", color:C.muted }}>
+            <Search size={44} style={{ marginBottom:14, opacity:.3 }}/>
+            <p style={{ fontFamily:"Georgia,serif", fontSize:"1.2rem", color:C.brown, marginBottom:12 }}>No properties match your filters</p>
+            <button onClick={()=>{setQ("");setType("All");setMaxPrice(300000);setCategory("all");}} style={{ padding:"9px 20px", background:C.primary, color:"white", border:"none", borderRadius:8, cursor:"pointer", fontWeight:600 }}>Clear Filters</button>
+          </div>
+        ) : (
+          <div className="props-grid" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:24 }}>
+            {filtered.map((p,i)=>(
+              <FadeIn key={p.id} delay={i*0.04}>
+                <PropCard prop={p} saved={saved} toggleSaved={toggleSaved} onClick={()=>openProp(p)}/>
+              </FadeIn>
+            ))}
+          </div>
+        )}
+      </div>
       <Footer setPage={setPage}/>
     </div>
   );
@@ -1078,11 +1174,6 @@ function AuthPage({ setUser, setPage, mode, setMode, showToast }) {
                 <button onClick={()=>setShowPwd(o=>!o)} style={{ position:"absolute", right:11, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", cursor:"pointer", color:C.muted }}>{showPwd?<EyeOff size={14}/>:<Eye size={14}/>}</button>
               </div>
             </div>
-            {mode==="login" && <div style={{ background:C.bg, borderRadius:7, padding:"8px 11px", fontSize:".73rem", color:C.muted, lineHeight:1.6 }}>
-              Guest: <strong>demo@staylocal.co.tz</strong> / <strong>demo123</strong><br/>
-              Host: <strong>host@staylocal.co.tz</strong> / <strong>host123</strong><br/>
-              Admin: <strong>admin@staylocal.co.tz</strong> / <strong>admin123</strong>
-            </div>}
             <button onClick={submit} disabled={loading} className="btn-press" style={{ padding:"12px", background:loading?C.muted:C.primary, color:"white", border:"none", borderRadius:11, fontWeight:700, fontSize:".93rem", cursor:loading?"not-allowed":"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:7, marginTop:4 }}>
               {loading?<><div style={{ width:15, height:15, border:"2px solid rgba(255,255,255,.4)", borderTopColor:"white", borderRadius:"50%", animation:"spin 1s linear infinite" }}/>{mode==="login"?"Signing in…":"Creating…"}</>:<>{mode==="login"?"Sign In":"Create Account"}<ArrowRight size={15}/></>}
             </button>
@@ -1544,12 +1635,18 @@ function FormGroup({ label, hint, children }) {
 }
 
 // ─── SUPER ADMIN: STAT CARD ──────────────────────────────
-function StatCard({ label, value, sub, bg, col }) {
+function StatCard({ label, value, sub, bg, col, icon }) {
   return (
-    <div style={{ background: bg||C.bg, borderRadius:12, padding:"16px 20px", border:`1px solid ${(col||C.primary)}22` }}>
-      <div style={{ fontSize:".68rem", fontWeight:700, color:col||C.muted, textTransform:"uppercase", letterSpacing:.5, marginBottom:2 }}>{label}</div>
-      <div style={{ fontFamily:"Georgia,serif", fontSize:"1.9rem", fontWeight:900, color:col||C.dark, lineHeight:1.1 }}>{value}</div>
-      {sub && <div style={{ fontSize:".72rem", color:C.muted, marginTop:3 }}>{sub}</div>}
+    <div style={{ background:"white", borderRadius:14, padding:"18px 20px", border:`1px solid ${C.border}`, boxShadow:"0 1px 6px rgba(0,0,0,.05)", position:"relative", overflow:"hidden" }}>
+      <div style={{ position:"absolute", top:0, left:0, right:0, height:3, background:col||C.primary, borderRadius:"14px 14px 0 0" }}/>
+      <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:10 }}>
+        <div style={{ flex:1 }}>
+          <div style={{ fontSize:".65rem", fontWeight:800, color:C.muted, textTransform:"uppercase", letterSpacing:.8, marginBottom:8 }}>{label}</div>
+          <div style={{ fontFamily:"Georgia,serif", fontSize:"1.8rem", fontWeight:900, color:C.dark, lineHeight:1.05, wordBreak:"break-all" }}>{value}</div>
+          {sub && <div style={{ fontSize:".72rem", color:C.muted, marginTop:5, display:"flex", alignItems:"center", gap:3 }}>{sub}</div>}
+        </div>
+        {icon && <div style={{ width:40, height:40, borderRadius:10, background:bg||C.primaryFaint, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{React.cloneElement(icon,{ size:18, color:col||C.primary })}</div>}
+      </div>
     </div>
   );
 }
@@ -1558,35 +1655,41 @@ function StatCard({ label, value, sub, bg, col }) {
 function AdminOverviewTab({ overview, logs }) {
   const fmt = n => n?.toLocaleString() || "0";
   const cards = [
-    { label:"Total Users", value: fmt(overview.totalUsers), sub:`${overview.totalGuests} guests · ${overview.totalHosts} hosts`, bg:"#EFF6FF", col:"#2563EB" },
-    { label:"Total Bookings", value: fmt(overview.totalBookings), sub:`${overview.pendingBookings||0} pending`, bg:"#FEF3C7", col:C.warning },
-    { label:"Confirmed Bookings", value: fmt(overview.confirmedBookings), sub:"malipo yamethibitishwa", bg:"#DCFCE7", col:C.success },
-    { label:"Cancelled", value: fmt(overview.cancelledBookings), sub:"bookings zilizofutwa", bg:"#FEE2E2", col:C.error },
-    { label:"Check-ins", value: fmt(overview.checkedInBookings), sub:"wamefika tayari", bg:"#F0FDF4", col:"#16803C" },
-    { label:"StayLocal Revenue", value:`TZS ${fmt(overview.totalRevenue)}`, sub:"5% service fee iliyokusanywa", bg:"#FDF4FF", col:"#9333EA" },
-    { label:"Logins Leo", value: fmt(overview.todayLogins), sub:"users walioingia leo", bg:"#FFF7ED", col:C.primary },
-    { label:"Logins Wiki Hii", value: fmt(overview.weekLogins), sub:`${overview.newUsersThisWeek} wapya wiki hii`, bg:"#F0F9FF", col:"#0284C7" },
+    { label:"Total Users",         value: fmt(overview.totalUsers),        sub:`${overview.totalGuests||0} guests · ${overview.totalHosts||0} hosts`,  icon:<Users/>,       col:"#2563EB", bg:"#EFF6FF" },
+    { label:"Total Bookings",      value: fmt(overview.totalBookings),      sub:`${overview.pendingBookings||0} inasubiri`,                              icon:<BookOpen/>,    col:C.warning, bg:"#FEF3C7" },
+    { label:"Confirmed Bookings",  value: fmt(overview.confirmedBookings),  sub:"malipo yamethibitishwa",                                               icon:<Check/>,       col:C.success, bg:"#DCFCE7" },
+    { label:"Cancelled",           value: fmt(overview.cancelledBookings),  sub:"bookings zilizofutwa",                                                 icon:<X/>,           col:C.error,   bg:"#FEE2E2" },
+    { label:"Check-ins",           value: fmt(overview.checkedInBookings),  sub:"wamefika tayari",                                                      icon:<LogIn/>,       col:"#16A34A", bg:"#F0FDF4" },
+    { label:"StayLocal Revenue",   value:`TZS ${fmt(overview.totalRevenue)}`,sub:"5% service fee",                                                     icon:<TrendingUp/>,  col:"#9333EA", bg:"#FDF4FF" },
+    { label:"Logins Leo",          value: fmt(overview.todayLogins),        sub:"users walioingia leo",                                                 icon:<Activity/>,    col:C.primary, bg:"#FFF7ED" },
+    { label:"Logins Wiki Hii",     value: fmt(overview.weekLogins),         sub:`${overview.newUsersThisWeek||0} wapya wiki hii`,                       icon:<Calendar/>,    col:"#0284C7", bg:"#F0F9FF" },
   ];
   return (
     <div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))", gap:12, marginBottom:32 }}>
-        {cards.map(c => <FadeIn key={c.label}><StatCard {...c}/></FadeIn>)}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))", gap:14, marginBottom:28 }}>
+        {cards.map((c,i) => <FadeIn key={c.label} delay={i*.04}><StatCard {...c}/></FadeIn>)}
       </div>
       <FadeIn>
-        <div style={{ background:"white", borderRadius:14, padding:"20px 24px", boxShadow:`0 3px 14px rgba(44,24,16,.06)` }}>
-          <h3 style={{ fontFamily:"Georgia,serif", fontWeight:700, fontSize:"1.05rem", color:C.dark, marginBottom:16 }}>Shughuli za Hivi Karibuni</h3>
+        <div style={{ background:"white", borderRadius:14, border:`1px solid ${C.border}`, overflow:"hidden", boxShadow:"0 2px 10px rgba(0,0,0,.05)" }}>
+          <div style={{ padding:"16px 22px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:9 }}>
+            <Activity size={15} color={C.primary}/>
+            <h3 style={{ fontFamily:"Georgia,serif", fontWeight:700, fontSize:"1rem", color:C.dark }}>Shughuli za Hivi Karibuni</h3>
+          </div>
           {(!logs||logs.length===0) ? (
-            <p style={{ color:C.muted, fontSize:".85rem", textAlign:"center", padding:"20px 0" }}>Hakuna shughuli bado</p>
+            <p style={{ color:C.muted, fontSize:".85rem", textAlign:"center", padding:"40px 0" }}>Hakuna shughuli bado</p>
           ) : (
-            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            <div>
               {logs.slice(0,15).map((l,i) => (
-                <div key={l.id||i} style={{ display:"flex", alignItems:"center", gap:12, padding:"8px 0", borderBottom:i<Math.min(logs.length,15)-1?`1px solid ${C.border}`:"none" }}>
-                  <div style={{ width:34, height:34, borderRadius:"50%", background:l.event==="register"?"#DCFCE7":"#EFF6FF", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-                    {l.event==="register" ? <Users size={14} color={C.success}/> : <User size={14} color="#2563EB"/>}
+                <div key={l.id||i} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 22px", borderBottom:i<Math.min(logs.length,15)-1?`1px solid ${C.border}`:"none", transition:"background .12s" }}>
+                  <div style={{ width:36, height:36, borderRadius:"50%", background:l.event==="register"?"#DCFCE7":"#EFF6FF", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                    {l.event==="register" ? <UserPlus size={14} color={C.success}/> : <LogIn size={14} color="#2563EB"/>}
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:".83rem", fontWeight:600, color:C.dark, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{l.userName}</div>
-                    <div style={{ fontSize:".72rem", color:C.muted }}>{l.event==="register"?"Akaunti mpya":"Ameingia"} · {l.role}</div>
+                    <div style={{ fontSize:".84rem", fontWeight:600, color:C.dark, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{l.userName}</div>
+                    <div style={{ fontSize:".72rem", color:C.muted, display:"flex", gap:6, marginTop:1 }}>
+                      <span style={{ background:l.event==="register"?"#DCFCE7":"#EFF6FF", color:l.event==="register"?C.success:"#2563EB", fontWeight:700, padding:"1px 7px", borderRadius:6, fontSize:".65rem" }}>{l.event==="register"?"AKAUNTI MPYA":"LOGIN"}</span>
+                      {l.role}
+                    </div>
                   </div>
                   <div style={{ fontSize:".7rem", color:C.muted, whiteSpace:"nowrap" }}>{new Date(l.timestamp).toLocaleString("sw-TZ",{hour:"2-digit",minute:"2-digit",day:"numeric",month:"short"})}</div>
                 </div>
@@ -1880,6 +1983,7 @@ function AdminPage({ propertyRequests, setPropertyRequests, showToast, user, set
   const [tab, setTab] = useState("overview");
   const [stats, setStats] = useState(null);
   const [loadingStats, setLoadingStats] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const fetchStats = useCallback(async () => {
     setLoadingStats(true);
@@ -1894,61 +1998,125 @@ function AdminPage({ propertyRequests, setPropertyRequests, showToast, user, set
   useEffect(() => { if (user?.role==="admin") fetchStats(); }, [user, fetchStats]);
 
   if (!user||user.role!=="admin") return (
-    <div style={{ maxWidth:500, margin:"80px auto", textAlign:"center", padding:"0 4%" }}>
-      <Shield size={44} style={{ marginBottom:14, color:C.error, opacity:.7 }}/>
-      <h2 style={{ fontFamily:"Georgia,serif", fontSize:"1.5rem", color:C.dark, marginBottom:10 }}>Hauna Ruhusa</h2>
-      <p style={{ color:C.muted }}>Super Admin pekee. Tumia: admin@staylocal.co.tz / admin123</p>
+    <div style={{ minHeight:"80vh", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4%" }}>
+      <div style={{ textAlign:"center", maxWidth:420 }}>
+        <div style={{ width:72, height:72, borderRadius:"50%", background:"#FEE2E2", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 20px" }}>
+          <Shield size={32} color={C.error}/>
+        </div>
+        <h2 style={{ fontFamily:"Georgia,serif", fontSize:"1.6rem", color:C.dark, marginBottom:10 }}>Hauna Ruhusa</h2>
+        <p style={{ color:C.muted, marginBottom:24 }}>Ukurasa huu ni wa Super Admin pekee ya StayLocal.</p>
+        <button onClick={()=>setPage("auth")} style={{ padding:"10px 24px", background:C.primary, color:"white", border:"none", borderRadius:9, fontWeight:700, cursor:"pointer" }}>Ingia kama Admin</button>
+      </div>
     </div>
   );
 
   const tabs = [
-    { id:"overview",    label:"Muhtasari",   icon:<BarChart3 size={14}/> },
-    { id:"users",       label:"Watumiaji",   icon:<Users size={14}/> },
-    { id:"bookings",    label:"Bookings",    icon:<BookOpen size={14}/> },
-    { id:"payments",    label:"Malipo",      icon:<CreditCard size={14}/> },
-    { id:"properties",  label:"Nyumba",      icon:<Home size={14}/> },
-    { id:"landlords",   label:"Landlords",   icon:<Building size={14}/> },
+    { id:"overview",   label:"Muhtasari",  icon:<BarChart3  size={16}/>, count: null },
+    { id:"users",      label:"Watumiaji",  icon:<Users      size={16}/>, count: stats?.overview?.totalUsers },
+    { id:"bookings",   label:"Bookings",   icon:<BookOpen   size={16}/>, count: stats?.overview?.totalBookings },
+    { id:"payments",   label:"Malipo",     icon:<CreditCard size={16}/>, count: stats?.paymentTransactions?.length },
+    { id:"properties", label:"Nyumba",     icon:<Home       size={16}/>, count: propertyRequests.filter(r=>r.status==="pending").length },
+    { id:"landlords",  label:"Landlords",  icon:<Building   size={16}/>, count: stats?.bookingsByLandlord?.length },
   ];
 
+  const DARK = "#0F1923";
+  const DARK2 = "#1A2535";
+  const DARK3 = "#243040";
+
   return (
-    <div style={{ maxWidth:1200, margin:"0 auto", padding:"40px 4%" }}>
-      <FadeIn>
-        <div style={{ marginBottom:24, display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:12 }}>
-          <div>
-            <span style={{ fontSize:".68rem", fontWeight:800, textTransform:"uppercase", letterSpacing:2, color:C.primary, display:"block", marginBottom:6 }}>Super Admin</span>
-            <h1 style={{ fontFamily:"Georgia,serif", fontSize:"1.9rem", fontWeight:700, color:C.dark }}>StayLocal Control Panel</h1>
-            <p style={{ color:C.muted, fontSize:".88rem", marginTop:4 }}>Muhtasari kamili wa mfumo wote wa StayLocal</p>
+    <div style={{ display:"flex", minHeight:"100vh", background:C.bg }}>
+      {/* SIDEBAR */}
+      <div style={{ width: sidebarOpen ? 230 : 60, flexShrink:0, background:DARK, display:"flex", flexDirection:"column", transition:"width .25s ease", overflow:"hidden", position:"sticky", top:0, height:"100vh" }}>
+        {/* Logo area */}
+        <div style={{ padding:"24px 16px 20px", borderBottom:"1px solid rgba(255,255,255,.08)" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <div style={{ width:34, height:34, borderRadius:9, background:C.primary, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+              <Shield size={17} color="white"/>
+            </div>
+            {sidebarOpen && <div>
+              <div style={{ color:"white", fontWeight:800, fontSize:".9rem", fontFamily:"Georgia,serif", whiteSpace:"nowrap" }}>StayLocal</div>
+              <div style={{ color:"rgba(255,255,255,.4)", fontSize:".62rem", fontWeight:700, textTransform:"uppercase", letterSpacing:.8 }}>Admin Panel</div>
+            </div>}
           </div>
-          <button onClick={fetchStats} style={{ display:"flex", alignItems:"center", gap:6, padding:"9px 16px", background:C.bg, border:`1.5px solid ${C.border}`, borderRadius:9, fontWeight:600, fontSize:".8rem", cursor:"pointer", color:C.brown }}>
-            <RefreshCw size={13}/>Sasisha
+        </div>
+
+        {/* Nav items */}
+        <nav style={{ flex:1, padding:"14px 10px", display:"flex", flexDirection:"column", gap:4 }}>
+          {tabs.map(t=>(
+            <button key={t.id} onClick={()=>setTab(t.id)} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 12px", borderRadius:10, border:"none", background:tab===t.id?`${C.primary}22`:"transparent", color:tab===t.id?"white":"rgba(255,255,255,.52)", cursor:"pointer", fontWeight:tab===t.id?700:500, fontSize:".84rem", textAlign:"left", transition:"all .15s", position:"relative", outline:"none" }}>
+              <span style={{ flexShrink:0, color:tab===t.id?C.primaryLight:"rgba(255,255,255,.4)", display:"flex" }}>{t.icon}</span>
+              {sidebarOpen && <span style={{ whiteSpace:"nowrap", flex:1 }}>{t.label}</span>}
+              {sidebarOpen && t.count!=null && t.count>0 && <span style={{ fontSize:".64rem", background:tab===t.id?C.primary:"rgba(255,255,255,.12)", color:tab===t.id?"white":"rgba(255,255,255,.6)", padding:"1px 7px", borderRadius:10, fontWeight:700 }}>{t.count}</span>}
+              {tab===t.id && <div style={{ position:"absolute", left:0, top:4, bottom:4, width:3, background:C.primary, borderRadius:"0 3px 3px 0" }}/>}
+            </button>
+          ))}
+        </nav>
+
+        {/* Bottom section */}
+        <div style={{ padding:"12px 10px", borderTop:"1px solid rgba(255,255,255,.08)", display:"flex", flexDirection:"column", gap:6 }}>
+          <button onClick={fetchStats} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderRadius:10, border:"none", background:"transparent", color:"rgba(255,255,255,.45)", cursor:"pointer", fontSize:".82rem", fontWeight:500, transition:"all .15s" }}>
+            <RefreshCw size={15} style={{ flexShrink:0 }}/>{sidebarOpen&&"Sasisha Data"}
+          </button>
+          <button onClick={()=>setSidebarOpen(s=>!s)} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderRadius:10, border:"none", background:"transparent", color:"rgba(255,255,255,.35)", cursor:"pointer", fontSize:".82rem", fontWeight:500 }}>
+            {sidebarOpen ? <ChevronLeft size={15}/> : <ChevronRight size={15}/>}
+            {sidebarOpen&&"Funga Menyu"}
           </button>
         </div>
-      </FadeIn>
-
-      {/* TABS */}
-      <div style={{ display:"flex", gap:4, marginBottom:24, background:C.bg, padding:4, borderRadius:13, overflowX:"auto", scrollbarWidth:"none" }}>
-        {tabs.map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{ display:"flex", alignItems:"center", gap:5, padding:"8px 14px", background:tab===t.id?"white":"transparent", border:"none", borderRadius:9, fontWeight:tab===t.id?700:500, fontSize:".82rem", cursor:"pointer", color:tab===t.id?C.primary:C.muted, boxShadow:tab===t.id?"0 2px 8px rgba(0,0,0,.09)":"none", whiteSpace:"nowrap", transition:"all .15s" }}>
-            {t.icon}{t.label}
-          </button>
-        ))}
       </div>
 
-      {loadingStats ? (
-        <div style={{ textAlign:"center", padding:"60px 0", color:C.muted }}>
-          <div style={{ width:32, height:32, border:`3px solid ${C.border}`, borderTopColor:C.primary, borderRadius:"50%", animation:"spin 1s linear infinite", margin:"0 auto 12px" }}/>
-          Inapakia data ya mfumo...
+      {/* MAIN CONTENT */}
+      <div style={{ flex:1, minWidth:0, display:"flex", flexDirection:"column" }}>
+        {/* Top bar */}
+        <div style={{ background:"white", borderBottom:`1px solid ${C.border}`, padding:"14px 28px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, flexShrink:0 }}>
+          <div>
+            <h2 style={{ fontFamily:"Georgia,serif", fontWeight:700, fontSize:"1.15rem", color:C.dark }}>
+              {tabs.find(t=>t.id===tab)?.label||""}
+            </h2>
+            <p style={{ fontSize:".75rem", color:C.muted, marginTop:1 }}>
+              {tab==="overview" && "Muhtasari kamili wa StayLocal"}
+              {tab==="users" && "Watumiaji wote waliojisajili"}
+              {tab==="bookings" && "Bookings zote — thibitisha au futa"}
+              {tab==="payments" && "Miamala ya AzamPesa"}
+              {tab==="properties" && "Maombi ya nyumba — idhinisha au kataa"}
+              {tab==="landlords" && "Landlords na takwimu zao"}
+            </p>
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            {loadingStats && <div style={{ width:18, height:18, border:`2px solid ${C.border}`, borderTopColor:C.primary, borderRadius:"50%", animation:"spin 1s linear infinite" }}/>}
+            <div style={{ display:"flex", alignItems:"center", gap:8, background:C.bg, padding:"7px 13px", borderRadius:9, border:`1px solid ${C.border}` }}>
+              <div style={{ width:28, height:28, borderRadius:"50%", background:C.primary, display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:800, fontSize:".7rem" }}>
+                {user.name?.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()}
+              </div>
+              <div>
+                <div style={{ fontSize:".75rem", fontWeight:700, color:C.dark }}>{user.name}</div>
+                <div style={{ fontSize:".62rem", color:C.primary, fontWeight:700, textTransform:"uppercase" }}>Super Admin</div>
+              </div>
+            </div>
+            <button onClick={()=>setPage("home")} style={{ display:"flex", alignItems:"center", gap:5, padding:"8px 13px", background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, fontSize:".78rem", color:C.muted, cursor:"pointer", fontWeight:500 }}>
+              <Home size={13}/> Nyumbani
+            </button>
+          </div>
         </div>
-      ) : (
-        <div>
-          {tab==="overview"   && stats && <AdminOverviewTab  overview={stats.overview} logs={stats.loginLogs}/>}
-          {tab==="users"      && stats && <AdminUsersTab     users={stats.users}/>}
-          {tab==="bookings"   && stats && <AdminBookingsTab  bookings={stats.bookings} showToast={showToast} onRefresh={fetchStats}/>}
-          {tab==="payments"   && stats && <AdminPaymentsTab  transactions={stats.paymentTransactions} overview={stats.overview}/>}
-          {tab==="properties" &&          <AdminPropertiesTab propertyRequests={propertyRequests} setPropertyRequests={setPropertyRequests} showToast={showToast}/>}
-          {tab==="landlords"  && stats && <AdminLandlordsTab landlords={stats.bookingsByLandlord}/>}
+
+        {/* TAB CONTENT */}
+        <div style={{ flex:1, padding:"26px 28px", overflowY:"auto" }}>
+          {loadingStats && !stats ? (
+            <div style={{ textAlign:"center", padding:"80px 0", color:C.muted }}>
+              <div style={{ width:40, height:40, border:`3px solid ${C.border}`, borderTopColor:C.primary, borderRadius:"50%", animation:"spin 1s linear infinite", margin:"0 auto 16px" }}/>
+              <p style={{ fontFamily:"Georgia,serif", fontSize:"1rem", color:C.brown }}>Inapakia data ya mfumo...</p>
+            </div>
+          ) : (
+            <div key={tab} style={{ animation:"slideUp .25s ease" }}>
+              {tab==="overview"   && stats && <AdminOverviewTab   overview={stats.overview} logs={stats.loginLogs}/>}
+              {tab==="users"      && stats && <AdminUsersTab      users={stats.users}/>}
+              {tab==="bookings"   && stats && <AdminBookingsTab   bookings={stats.bookings} showToast={showToast} onRefresh={fetchStats}/>}
+              {tab==="payments"   && stats && <AdminPaymentsTab   transactions={stats.paymentTransactions} overview={stats.overview}/>}
+              {tab==="properties" &&          <AdminPropertiesTab propertyRequests={propertyRequests} setPropertyRequests={setPropertyRequests} showToast={showToast}/>}
+              {tab==="landlords"  && stats && <AdminLandlordsTab  landlords={stats.bookingsByLandlord}/>}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
