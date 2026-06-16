@@ -28,7 +28,8 @@ const AZAM = {
   clientId:     process.env.AZAM_CLIENT_ID     || '',
   clientSecret: process.env.AZAM_CLIENT_SECRET || '',
   vendorId:     process.env.AZAM_VENDOR_ID     || '',
-  baseUrl:      process.env.AZAM_BASE_URL      || 'https://sandbox.azampesa.co.tz',
+  authUrl:      process.env.AZAM_AUTH_URL      || 'https://authenticator-sandbox.azampay.co.tz',
+  checkoutUrl:  process.env.AZAM_CHECKOUT_URL  || 'https://sandbox.azampay.co.tz',
   callbackUrl:  process.env.AZAM_CALLBACK_URL  || 'http://localhost:3001/api/payment/callback',
 };
 
@@ -104,7 +105,7 @@ function makeRequest(url, method, body, headers) {
 }
 
 async function getAzamToken() {
-  const res = await makeRequest(`${AZAM.baseUrl}/api/token`, 'GET', null, {
+  const res = await makeRequest(`${AZAM.authUrl}/api/token`, 'GET', null, {
     'X-APP-NAME': AZAM.appName,
     'X-CLIENT-ID': AZAM.clientId,
     'X-CLIENT-SECRET': AZAM.clientSecret,
@@ -255,7 +256,7 @@ app.post('/api/payment/initiate', async (req, res) => {
     if (!token) throw new Error('Token haikupatikana');
 
     // Tuma ombi la malipo
-    const payRes = await makeRequest(`${AZAM.baseUrl}/api/payment`, 'POST', {
+    const payRes = await makeRequest(`${AZAM.checkoutUrl}/api/payment`, 'POST', {
       appName: AZAM.appName,
       clientId: AZAM.clientId,
       clientSecret: AZAM.clientSecret,
@@ -423,7 +424,8 @@ app.listen(PORT, () => {
   console.log(`\n✓ StayLocal API running on http://localhost:${PORT}`);
   console.log(`\n─── AzamPesa Status ───────────────────────────`);
   console.log(`  Mode:        ${hasCreds ? '✓ SANDBOX (real API)' : '⚠ SIMULATION (no credentials)'}`);
-  console.log(`  Base URL:    ${AZAM.baseUrl}`);
+  console.log(`  Auth URL:     ${AZAM.authUrl}`);
+  console.log(`  Checkout URL: ${AZAM.checkoutUrl}`);
   console.log(`  Callback:    ${AZAM.callbackUrl}`);
   console.log(`  Credentials: ${hasCreds ? '✓ SET' : '✗ NOT SET — weka kwenye .env'}`);
   console.log(`───────────────────────────────────────────────\n`);
