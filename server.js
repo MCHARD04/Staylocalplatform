@@ -105,12 +105,22 @@ function makeRequest(url, method, body, headers) {
 }
 
 async function getAzamToken() {
-  const res = await makeRequest(`${AZAM.authUrl}/api/token`, 'GET', null, {
-    'X-APP-NAME': AZAM.appName,
-    'X-CLIENT-ID': AZAM.clientId,
-    'X-CLIENT-SECRET': AZAM.clientSecret,
-  });
-  return res.data?.token || null;
+  try {
+    const res = await makeRequest(`${AZAM.authUrl}/api/token`, 'POST', {
+      appName:      AZAM.appName,
+      clientId:     AZAM.clientId,
+      clientSecret: AZAM.clientSecret,
+    });
+    console.log('[AzamPay] Token response:', JSON.stringify(res.data));
+    // AzamPay returns token at data.accessToken or data.token
+    return res.data?.data?.accessToken
+        || res.data?.accessToken
+        || res.data?.token
+        || null;
+  } catch (err) {
+    console.error('[AzamPay] Token error:', err.message);
+    return null;
+  }
 }
 
 // ─── AUTH ENDPOINTS ───────────────────────────────────────────
