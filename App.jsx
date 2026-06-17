@@ -222,10 +222,11 @@ export default function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [toasts, showToast] = useToast();
 
-  // Landlord submission requests (in-memory "database")
-  const [propertyRequests, setPropertyRequests] = useState([
-    { id: 1, title:"Msasani Studio", location:"Msasani, Dar es Salaam", hostName:"Ahmed S.", phone:"0712345678", email:"ahmed@gmail.com", status:"pending", date:"2026-06-10", price:80000, type:"Entire Home", description:"Modern studio near Msasani beach.", beds:1, baths:1, maxGuests:2, amenities:["WiFi","AC","Parking"], images:[] },
-  ]);
+  // Landlord submission requests - zinatoka PostgreSQL kupitia backend
+  const [propertyRequests, setPropertyRequests] = useState([]);
+  useEffect(() => {
+    fetch("/api/property-requests").then(r=>r.json()).then(d=>{ if (d.success) setPropertyRequests(d.requests); }).catch(()=>{});
+  }, []);
   const [reviews, setReviews] = useState(REVIEWS_DB);
 
   const toggleSaved = id => {
@@ -1495,13 +1496,20 @@ function ListPropertyPage({ user, setPage, showToast, setAuthMode, propertyReque
     return true;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validate()) return;
     if (!user) { setAuthMode("register"); setPage("auth"); showToast("Create an account to list","error"); return; }
-    const req = { id:Date.now(), ...form, status:"pending", date:new Date().toISOString().split("T")[0] };
-    setPropertyRequests(p=>[...p,req]);
-    setSubmitted(true);
-    showToast("Property submitted for verification!");
+    try {
+      const res = await fetch("/api/property-requests", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify(form),
+      });
+      const data = await res.json();
+      if (!data.success) { showToast("Tatizo la kutuma, jaribu tena","error"); return; }
+      setPropertyRequests(p=>[data.request, ...p]);
+      setSubmitted(true);
+      showToast("Property submitted for verification!");
+    } catch { showToast("Tatizo la network, jaribu tena","error"); }
   };
 
   if (submitted) return (
@@ -1979,8 +1987,20 @@ function AdminPaymentsTab({ transactions, overview }) {
 
 // ─── SUPER ADMIN: PROPERTIES TAB ─────────────────────────
 function AdminPropertiesTab({ propertyRequests, setPropertyRequests, showToast }) {
-  const approve = id => { setPropertyRequests(p=>p.map(r=>r.id===id?{...r,status:"approved"}:r)); showToast("Nyumba imeidhinishwa na imewekwa kwenye orodha!"); };
-  const reject  = id => { setPropertyRequests(p=>p.map(r=>r.id===id?{...r,status:"rejected"}:r)); showToast("Nyumba imekataliwa.","error"); };
+  const updateStatus = async (id, status) => {
+    try {
+      const res = await fetch(`/api/property-requests/${id}`, {
+        method:"PATCH", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json();
+      if (!data.success) { showToast("Tatizo, jaribu tena","error"); return; }
+      setPropertyRequests(p=>p.map(r=>r.id===id?data.request:r));
+      showToast(status==="approved" ? "Nyumba imeidhinishwa na imewekwa kwenye orodha!" : "Nyumba imekataliwa.", status==="approved"?"success":"error");
+    } catch { showToast("Tatizo la network, jaribu tena","error"); }
+  };
+  const approve = id => updateStatus(id, "approved");
+  const reject  = id => updateStatus(id, "rejected");
 
   return (
     <div>

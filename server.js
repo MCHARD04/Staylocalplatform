@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const https = require('https');
 const http = require('http');
+const pool = require('./db');
 const app = express();
 
 app.use(cors());
@@ -16,11 +17,10 @@ app.get('*', (req, res, next) => {
 
 // ─── FLUTTERWAVE CONFIG ───────────────────────────────────────
 // HATUA ZA KUPATA CREDENTIALS:
-// 1. Nenda https://dashboard.flutterwave.com/signup na ujisajili
-// 2. Baada ya kuingia, nenda Settings > API Keys
-// 3. Test keys zinafanya kazi MARA MOJA - hauhitaji activation/approval
-// 4. Nakili "Test Secret Key" (FLWSECK_TEST-...) na weka kwenye .env
-// 5. Production: badilisha na "Live Secret Key" baada ya KYC verification
+// 1. Nenda: https://dashboard.flutterwave.com/signup
+// 2. Jisajili (hauhitaji approval - test keys zinafanya kazi mara moja)
+// 3. Login, nenda: Settings > API Keys
+// 4. Nakili "Test Secret Key" (huanza na FLWSECK_TEST-)
 const FLW = {
   secretKey:   process.env.FLW_SECRET_KEY   || '',
   publicKey:   process.env.FLW_PUBLIC_KEY   || '',
@@ -29,37 +29,61 @@ const FLW = {
   webhookHash: process.env.FLW_WEBHOOK_HASH || '',
 };
 
-// ─── IN-MEMORY DATA ──────────────────────────────────────────
-let loginLogs = [];
-let paymentTransactions = [];
-let nextIds = { booking: 2, user: 4, payment: 1, log: 1 };
+// ─── ROW → API MAPPERS (snake_case DB columns → camelCase API fields) ─────
+function mapUser(row) {
+  if (!row) return null;
+  return {
+    id: row.id, name: row.name, email: row.email, role: row.role,
+    saved: row.saved || [], createdAt: row.created_at,
+  };
+}
+function mapProperty(row) {
+  return {
+    id: row.id, title: row.title, location: row.location, price: row.price, type: row.type,
+    rating: parseFloat(row.rating), reviews: row.reviews, verified: row.verified, available: row.available,
+    image: row.image, amenities: row.amenities || [], beds: row.beds, baths: row.baths, guests: row.guests,
+    description: row.description, hostId: row.host_id, hostName: row.host_name,
+  };
+}
+function mapBooking(row) {
+  return {
+    id: row.id, userId: row.user_id, propertyId: row.property_id,
+    checkIn: row.check_in.toISOString().split('T')[0], checkOut: row.check_out.toISOString().split('T')[0],
+    guests: row.guests, nights: row.nights, total: row.total, serviceFee: row.service_fee,
+    status: row.status, paymentMethod: row.payment_method,
+    propertyTitle: row.property_title, propertyImage: row.property_image, propertyLocation: row.property_location,
+    hostId: row.host_id, hostName: row.host_name, cancelReason: row.cancel_reason,
+    createdAt: row.created_at, updatedAt: row.updated_at, checkedInAt: row.checked_in_at, cancelledAt: row.cancelled_at,
+  };
+}
+function mapReview(row) {
+  return {
+    id: row.id, propertyId: row.property_id, userId: row.user_id, userName: row.user_name,
+    rating: row.rating, comment: row.comment, date: row.date ? row.date.toISOString().split('T')[0] : null,
+    avatar: row.avatar,
+  };
+}
+function mapTransaction(row) {
+  return {
+    id: row.id, bookingId: row.booking_id, userId: row.user_id, amount: row.amount, phone: row.phone,
+    provider: row.provider, cardLast4: row.card_last4, cardName: row.card_name, cardExpiry: row.card_expiry,
+    status: row.status, azamTransactionId: row.azam_transaction_id, externalId: row.external_id, mode: row.mode,
+    createdAt: row.created_at, completedAt: row.completed_at,
+  };
+}
+function mapPropertyRequest(row) {
+  return {
+    id: row.id, title: row.title, location: row.location, hostName: row.host_name, phone: row.phone,
+    email: row.email, status: row.status, date: row.date ? row.date.toISOString().split('T')[0] : null,
+    price: row.price, type: row.type, description: row.description, beds: row.beds, baths: row.baths,
+    maxGuests: row.max_guests, amenities: row.amenities || [], images: row.images || [],
+  };
+}
+function mapLoginLog(row) {
+  return { id: row.id, userId: row.user_id, userName: row.user_name, email: row.email, role: row.role, event: row.event, timestamp: row.timestamp.toISOString() };
+}
 
-let users = [
-  { id: 1, name: 'Demo User', email: 'demo@staylocal.co.tz', password: 'demo123', role: 'guest', bookings: [], saved: [1,3], createdAt: '2026-01-10' },
-  { id: 2, name: 'Host John', email: 'host@staylocal.co.tz', password: 'host123', role: 'host', properties: [1,2], bookings: [], saved: [], createdAt: '2026-01-15' },
-  { id: 3, name: 'Super Admin', email: 'admin@staylocal.co.tz', password: 'admin123', role: 'admin', bookings: [], saved: [], createdAt: '2026-01-01' },
-];
-
-let properties = [
-  { id: 1, title: 'Sinza Deluxe Studio', location: 'Sinza, Dar es Salaam', price: 75000, type: 'Entire Home', rating: 4.8, reviews: 24, verified: true, available: true, image: 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=600&q=80', amenities: ['WiFi','AC','Kitchen','Security','Water'], beds: 1, baths: 1, guests: 2, description: 'Modern studio in quiet Sinza neighborhood.', hostId: 2, hostName: 'Host John' },
-  { id: 2, title: 'Masaki Executive Suite', location: 'Masaki, Dar es Salaam', price: 150000, type: 'Private Room', rating: 4.9, reviews: 41, verified: true, available: true, image: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=600&q=80', amenities: ['Pool','Gym','Parking','WiFi','AC'], beds: 2, baths: 2, guests: 4, description: 'Premium suite in upmarket Masaki.', hostId: 2, hostName: 'Host John' },
-  { id: 3, title: 'Mikocheni Garden Apartment', location: 'Mikocheni, Dar es Salaam', price: 95000, type: 'Entire Home', rating: 4.7, reviews: 18, verified: true, available: true, image: 'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=600&q=80', amenities: ['Garden','WiFi','Parking','Kitchen','Washer'], beds: 2, baths: 1, guests: 4, description: 'Peaceful apartment with private garden.', hostId: 2, hostName: 'Host John' },
-  { id: 4, title: 'Kariakoo Business Room', location: 'Kariakoo, Dar es Salaam', price: 45000, type: 'Private Room', rating: 4.5, reviews: 33, verified: true, available: true, image: 'https://images.unsplash.com/photo-1631049552240-59c37f38802b?w=600&q=80', amenities: ['WiFi','AC','Security'], beds: 1, baths: 1, guests: 1, description: 'Clean room in heart of Kariakoo.', hostId: 2, hostName: 'Host John' },
-  { id: 5, title: 'Oyster Bay Beachfront Villa', location: 'Oyster Bay, Dar es Salaam', price: 280000, type: 'Entire Home', rating: 5.0, reviews: 12, verified: true, available: true, image: 'https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?w=600&q=80', amenities: ['Beach Access','Pool','WiFi','AC','Kitchen','Parking','Security'], beds: 3, baths: 3, guests: 6, description: 'Stunning beachfront villa with private pool.', hostId: 2, hostName: 'Host John' },
-  { id: 6, title: 'Upanga City Apartment', location: 'Upanga, Dar es Salaam', price: 60000, type: 'Entire Home', rating: 4.6, reviews: 29, verified: true, available: true, image: 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=600&q=80', amenities: ['WiFi','Kitchen','AC','City View'], beds: 1, baths: 1, guests: 2, description: 'Stylish city apartment with skyline views.', hostId: 2, hostName: 'Host John' },
-];
-
-let bookings = [
-  { id: 1, userId: 1, propertyId: 1, checkIn: '2026-06-20', checkOut: '2026-06-23', guests: 2, nights: 3, total: 225000, serviceFee: 11250, status: 'confirmed', paymentMethod: 'AzamPesa', propertyTitle: 'Sinza Deluxe Studio', propertyImage: 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=600&q=80', hostId: 2, hostName: 'Host John', createdAt: '2026-06-10' }
-];
-
-let reviews = [
-  { id: 1, propertyId: 1, userId: 1, userName: 'Amina M.', rating: 5, comment: 'Nilifika Dar es Salaam kwa kazi na niliogopa kupoteza pesa kwa madalali. StayLocal ilinisaidia sana!', date: '2026-05-15', avatar: 'AM' },
-  { id: 2, propertyId: 2, userId: 1, userName: 'James K.', rating: 5, comment: 'Pool and gym were amazing. Clean, modern and exactly as shown. Will book again!', date: '2026-05-20', avatar: 'JK' },
-  { id: 3, propertyId: 3, userId: 1, userName: 'Fatuma N.', rating: 5, comment: 'Perfect family stay near the hospital. Garden was great for the kids.', date: '2026-06-01', avatar: 'FN' }
-];
-
-// ─── AZAMPESA HTTP HELPER ─────────────────────────────────────
+// ─── HTTP HELPER (kwa Flutterwave) ─────────────────────────────
 function makeRequest(url, method, body, headers) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
@@ -99,122 +123,177 @@ async function verifyFlutterwaveTransaction(id) {
 }
 
 // ─── AUTH ENDPOINTS ───────────────────────────────────────────
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   const { name, email, password, role = 'guest' } = req.body;
   if (!name || !email || !password) return res.status(400).json({ error: 'All fields required' });
-  if (users.find(u => u.email === email)) return res.status(409).json({ error: 'Email already registered' });
-  const user = {
-    id: nextIds.user++, name, email, password, role,
-    bookings: [], saved: [], properties: [],
-    createdAt: new Date().toISOString().split('T')[0]
-  };
-  users.push(user);
-  loginLogs.push({ id: nextIds.log++, userId: user.id, userName: user.name, email: user.email, role: user.role, event: 'register', timestamp: new Date().toISOString() });
-  const { password: _, ...safe } = user;
-  res.json({ success: true, user: safe, token: `token_${user.id}_${Date.now()}` });
+  try {
+    const existing = await pool.query('SELECT id FROM users WHERE email=$1', [email]);
+    if (existing.rows.length) return res.status(409).json({ error: 'Email already registered' });
+
+    const { rows } = await pool.query(
+      `INSERT INTO users (name, email, password, role) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [name, email, password, role]
+    );
+    const user = rows[0];
+    await pool.query(
+      `INSERT INTO login_logs (user_id, user_name, email, role, event) VALUES ($1,$2,$3,$4,'register')`,
+      [user.id, user.name, user.email, user.role]
+    );
+    res.json({ success: true, user: mapUser(user), token: `token_${user.id}_${Date.now()}` });
+  } catch (err) {
+    console.error('[Register Error]', err.message);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
-  const user = users.find(u => u.email === email && u.password === password);
-  if (!user) return res.status(401).json({ error: 'Invalid email or password' });
-  loginLogs.push({ id: nextIds.log++, userId: user.id, userName: user.name, email: user.email, role: user.role, event: 'login', timestamp: new Date().toISOString() });
-  const { password: _, ...safe } = user;
-  res.json({ success: true, user: safe, token: `token_${user.id}_${Date.now()}` });
+  try {
+    const { rows } = await pool.query('SELECT * FROM users WHERE email=$1 AND password=$2', [email, password]);
+    const user = rows[0];
+    if (!user) return res.status(401).json({ error: 'Invalid email or password' });
+    await pool.query(
+      `INSERT INTO login_logs (user_id, user_name, email, role, event) VALUES ($1,$2,$3,$4,'login')`,
+      [user.id, user.name, user.email, user.role]
+    );
+    res.json({ success: true, user: mapUser(user), token: `token_${user.id}_${Date.now()}` });
+  } catch (err) {
+    console.error('[Login Error]', err.message);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // ─── PROPERTIES ───────────────────────────────────────────────
-app.get('/api/properties', (req, res) => {
+app.get('/api/properties', async (req, res) => {
   const { location, type, minPrice, maxPrice, beds } = req.query;
-  let results = [...properties];
-  if (location) results = results.filter(p => p.location.toLowerCase().includes(location.toLowerCase()) || p.title.toLowerCase().includes(location.toLowerCase()));
-  if (type && type !== 'All') results = results.filter(p => p.type === type);
-  if (minPrice) results = results.filter(p => p.price >= parseInt(minPrice));
-  if (maxPrice) results = results.filter(p => p.price <= parseInt(maxPrice));
-  if (beds) results = results.filter(p => p.beds >= parseInt(beds));
-  res.json({ success: true, count: results.length, properties: results });
+  const conditions = [];
+  const params = [];
+  if (location) { params.push(`%${location.toLowerCase()}%`); conditions.push(`(LOWER(location) LIKE $${params.length} OR LOWER(title) LIKE $${params.length})`); }
+  if (type && type !== 'All') { params.push(type); conditions.push(`type = $${params.length}`); }
+  if (minPrice) { params.push(parseInt(minPrice)); conditions.push(`price >= $${params.length}`); }
+  if (maxPrice) { params.push(parseInt(maxPrice)); conditions.push(`price <= $${params.length}`); }
+  if (beds) { params.push(parseInt(beds)); conditions.push(`beds >= $${params.length}`); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const { rows } = await pool.query(`SELECT * FROM properties ${where} ORDER BY id`, params);
+  res.json({ success: true, count: rows.length, properties: rows.map(mapProperty) });
 });
 
-app.get('/api/properties/:id', (req, res) => {
-  const prop = properties.find(p => p.id === parseInt(req.params.id));
-  if (!prop) return res.status(404).json({ error: 'Property not found' });
-  const propReviews = reviews.filter(r => r.propertyId === prop.id);
-  res.json({ success: true, property: { ...prop, reviewsList: propReviews } });
+app.get('/api/properties/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { rows } = await pool.query('SELECT * FROM properties WHERE id=$1', [id]);
+  if (!rows[0]) return res.status(404).json({ error: 'Property not found' });
+  const { rows: revRows } = await pool.query('SELECT * FROM reviews WHERE property_id=$1 ORDER BY id DESC', [id]);
+  res.json({ success: true, property: { ...mapProperty(rows[0]), reviewsList: revRows.map(mapReview) } });
 });
 
 // ─── BOOKINGS ─────────────────────────────────────────────────
-app.post('/api/bookings', (req, res) => {
+app.post('/api/bookings', async (req, res) => {
   const { userId, propertyId, checkIn, checkOut, guests, paymentMethod } = req.body;
-  const property = properties.find(p => p.id === parseInt(propertyId));
-  if (!property) return res.status(404).json({ error: 'Property not found' });
-  const nights = Math.ceil((new Date(checkOut) - new Date(checkIn)) / 86400000);
-  if (nights < 1) return res.status(400).json({ error: 'Invalid dates' });
-  const serviceFee = Math.round(property.price * nights * 0.05);
-  const total = (property.price * nights) + serviceFee;
-  const host = users.find(u => u.id === property.hostId);
-  const booking = {
-    id: nextIds.booking++,
-    userId: parseInt(userId), propertyId: parseInt(propertyId),
-    checkIn, checkOut, guests: parseInt(guests), nights, total, serviceFee,
-    status: 'confirmed',
-    paymentMethod: paymentMethod || 'AzamPesa',
-    propertyTitle: property.title,
-    propertyImage: property.image,
-    propertyLocation: property.location,
-    hostId: property.hostId,
-    hostName: host?.name || property.hostName || 'Unknown',
-    createdAt: new Date().toISOString().split('T')[0]
-  };
-  bookings.push(booking);
-  const user = users.find(u => u.id === parseInt(userId));
-  if (user) user.bookings.push(booking.id);
-  res.json({ success: true, booking, message: 'Booking confirmed! Funds held in StayLocal Escrow.' });
+  try {
+    const { rows: propRows } = await pool.query('SELECT * FROM properties WHERE id=$1', [parseInt(propertyId)]);
+    const property = propRows[0];
+    if (!property) return res.status(404).json({ error: 'Property not found' });
+
+    const nights = Math.ceil((new Date(checkOut) - new Date(checkIn)) / 86400000);
+    if (nights < 1) return res.status(400).json({ error: 'Invalid dates' });
+    const serviceFee = Math.round(property.price * nights * 0.05);
+    const total = (property.price * nights) + serviceFee;
+
+    const { rows: hostRows } = await pool.query('SELECT name FROM users WHERE id=$1', [property.host_id]);
+    const hostName = hostRows[0]?.name || property.host_name || 'Unknown';
+
+    const { rows } = await pool.query(
+      `INSERT INTO bookings (user_id, property_id, check_in, check_out, guests, nights, total, service_fee, status, payment_method, property_title, property_image, property_location, host_id, host_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'confirmed',$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [parseInt(userId), parseInt(propertyId), checkIn, checkOut, parseInt(guests), nights, total, serviceFee,
+       paymentMethod || 'AzamPesa', property.title, property.image, property.location, property.host_id, hostName]
+    );
+    res.json({ success: true, booking: mapBooking(rows[0]), message: 'Booking confirmed! Funds held in StayLocal Escrow.' });
+  } catch (err) {
+    console.error('[Booking Error]', err.message);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
-app.get('/api/bookings/user/:userId', (req, res) => {
-  const userBookings = bookings.filter(b => b.userId === parseInt(req.params.userId));
-  res.json({ success: true, bookings: userBookings });
+app.get('/api/bookings/user/:userId', async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM bookings WHERE user_id=$1 ORDER BY id DESC', [parseInt(req.params.userId)]);
+  res.json({ success: true, bookings: rows.map(mapBooking) });
 });
 
-app.delete('/api/bookings/:id', (req, res) => {
-  const idx = bookings.findIndex(b => b.id === parseInt(req.params.id));
-  if (idx === -1) return res.status(404).json({ error: 'Booking not found' });
-  bookings[idx].status = 'cancelled';
-  bookings[idx].cancelledAt = new Date().toISOString();
+app.delete('/api/bookings/:id', async (req, res) => {
+  const { rows } = await pool.query(
+    `UPDATE bookings SET status='cancelled', cancelled_at=NOW() WHERE id=$1 RETURNING *`,
+    [parseInt(req.params.id)]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'Booking not found' });
   res.json({ success: true, message: 'Booking cancelled. Refund will be processed in 24hrs.' });
 });
 
-app.patch('/api/bookings/:id/status', (req, res) => {
+app.patch('/api/bookings/:id/status', async (req, res) => {
   const { status } = req.body;
-  const booking = bookings.find(b => b.id === parseInt(req.params.id));
-  if (!booking) return res.status(404).json({ error: 'Booking not found' });
-  booking.status = status;
-  booking.updatedAt = new Date().toISOString();
-  if (status === 'checked-in') booking.checkedInAt = new Date().toISOString();
-  res.json({ success: true, booking });
+  const extra = status === 'checked-in' ? ", checked_in_at = NOW()" : "";
+  const { rows } = await pool.query(
+    `UPDATE bookings SET status=$1, updated_at=NOW()${extra} WHERE id=$2 RETURNING *`,
+    [status, parseInt(req.params.id)]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'Booking not found' });
+  res.json({ success: true, booking: mapBooking(rows[0]) });
 });
 
 // ─── SAVED PROPERTIES ─────────────────────────────────────────
-app.post('/api/saved/:userId/:propertyId', (req, res) => {
-  const user = users.find(u => u.id === parseInt(req.params.userId));
-  if (!user) return res.status(404).json({ error: 'User not found' });
+app.post('/api/saved/:userId/:propertyId', async (req, res) => {
+  const userId = parseInt(req.params.userId);
   const propId = parseInt(req.params.propertyId);
-  if (user.saved.includes(propId)) { user.saved = user.saved.filter(id => id !== propId); res.json({ success: true, saved: false }); }
-  else { user.saved.push(propId); res.json({ success: true, saved: true }); }
+  const { rows } = await pool.query('SELECT saved FROM users WHERE id=$1', [userId]);
+  if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+  const saved = rows[0].saved || [];
+  const isSaved = !saved.includes(propId);
+  const newSaved = isSaved ? [...saved, propId] : saved.filter(id => id !== propId);
+  await pool.query('UPDATE users SET saved=$1 WHERE id=$2', [newSaved, userId]);
+  res.json({ success: true, saved: isSaved });
 });
 
-app.get('/api/saved/:userId', (req, res) => {
-  const user = users.find(u => u.id === parseInt(req.params.userId));
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json({ success: true, properties: properties.filter(p => user.saved.includes(p.id)) });
+app.get('/api/saved/:userId', async (req, res) => {
+  const { rows } = await pool.query('SELECT saved FROM users WHERE id=$1', [parseInt(req.params.userId)]);
+  if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+  const saved = rows[0].saved || [];
+  if (!saved.length) return res.json({ success: true, properties: [] });
+  const { rows: props } = await pool.query('SELECT * FROM properties WHERE id = ANY($1)', [saved]);
+  res.json({ success: true, properties: props.map(mapProperty) });
 });
 
 // ─── REVIEWS ──────────────────────────────────────────────────
-app.post('/api/reviews', (req, res) => {
+app.post('/api/reviews', async (req, res) => {
   const { propertyId, userId, userName, rating, comment } = req.body;
-  const review = { id: reviews.length + 1, propertyId: parseInt(propertyId), userId: parseInt(userId), userName, rating: parseInt(rating), comment, date: new Date().toISOString().split('T')[0], avatar: userName.split(' ').map(n => n[0]).join('').toUpperCase() };
-  reviews.push(review);
-  res.json({ success: true, review });
+  const avatar = userName.split(' ').map(n => n[0]).join('').toUpperCase();
+  const { rows } = await pool.query(
+    `INSERT INTO reviews (property_id, user_id, user_name, rating, comment, avatar) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+    [parseInt(propertyId), parseInt(userId), userName, parseInt(rating), comment, avatar]
+  );
+  res.json({ success: true, review: mapReview(rows[0]) });
+});
+
+// ─── PROPERTY REQUESTS (landlord submissions) ──────────────────
+app.get('/api/property-requests', async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM property_requests ORDER BY id DESC');
+  res.json({ success: true, requests: rows.map(mapPropertyRequest) });
+});
+
+app.post('/api/property-requests', async (req, res) => {
+  const { title, location, hostName, phone, email, price, type, description, beds, baths, maxGuests, amenities, images } = req.body;
+  const { rows } = await pool.query(
+    `INSERT INTO property_requests (title, location, host_name, phone, email, price, type, description, beds, baths, max_guests, amenities, images)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+    [title, location, hostName, phone, email, price, type, description, beds, baths, maxGuests, amenities || [], JSON.stringify(images || [])]
+  );
+  res.json({ success: true, request: mapPropertyRequest(rows[0]) });
+});
+
+app.patch('/api/property-requests/:id', async (req, res) => {
+  const { status } = req.body;
+  const { rows } = await pool.query('UPDATE property_requests SET status=$1 WHERE id=$2 RETURNING *', [status, req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+  res.json({ success: true, request: mapPropertyRequest(rows[0]) });
 });
 
 // ─── PAYMENT INITIATE (Mobile Money + Card) ───────────────────
@@ -226,31 +305,27 @@ app.post('/api/payment/initiate', async (req, res) => {
   // ── CARD PAYMENT ──────────────────────────────────────────────
   if (isCard) {
     const txnId = `CARD${Date.now()}`;
-    const last4 = (cardNum||'').slice(-4);
-    paymentTransactions.push({
-      id: nextIds.payment++, bookingId, userId: parseInt(userId || 0),
-      amount, phone: null, provider: cardBrand || 'CARD',
-      cardLast4: last4, cardName, cardExpiry,
-      status: 'completed', azamTransactionId: txnId,
-      externalId: txRef, mode: 'card', createdAt: new Date().toISOString()
-    });
+    const last4 = (cardNum || '').slice(-4);
+    await pool.query(
+      `INSERT INTO payment_transactions (booking_id, user_id, amount, provider, card_last4, card_name, card_expiry, status, azam_transaction_id, external_id, mode)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'completed',$8,$9,'card')`,
+      [bookingId || null, parseInt(userId || 0), amount, cardBrand || 'CARD', last4, cardName, cardExpiry, txnId, txRef]
+    );
     return res.json({ success: true, transactionId: txnId, status: 'completed', message: `Kadi ****${last4} imethibitishwa` });
   }
 
   // Kama credentials hazijawekwa, simulate kwa majaribio
   if (!FLW.secretKey) {
     const txnId = `TXN${Date.now()}`;
-    paymentTransactions.push({
-      id: nextIds.payment++, bookingId, userId: parseInt(userId || 0),
-      amount, phone, provider, status: 'pending',
-      azamTransactionId: txnId, externalId: txRef, mode: 'simulation',
-      createdAt: new Date().toISOString()
-    });
+    await pool.query(
+      `INSERT INTO payment_transactions (booking_id, user_id, amount, phone, provider, status, azam_transaction_id, external_id, mode)
+       VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,'simulation')`,
+      [bookingId || null, parseInt(userId || 0), amount, phone, provider, txnId, txRef]
+    );
     return res.json({ success: true, transactionId: txnId, status: 'pending', message: 'STK Push imetumwa! Weka PIN yako ya ' + provider });
   }
 
   try {
-    // Flutterwave inaautomatically detect mtandao (Vodacom/Tigo/Airtel/Halo) kutoka namba ya simu
     const payRes = await makeRequest(`${FLW.baseUrl}/charges?type=mobile_money_tanzania`, 'POST', {
       tx_ref: txRef,
       amount: String(amount),
@@ -262,47 +337,46 @@ app.post('/api/payment/initiate', async (req, res) => {
     }, { 'Authorization': `Bearer ${FLW.secretKey}` });
 
     console.log('[Flutterwave] Charge response:', JSON.stringify(payRes.data));
-
     if (payRes.data?.status !== 'success') throw new Error(payRes.data?.message || 'Flutterwave charge failed');
 
     const txnId = String(payRes.data?.data?.id || txRef);
-    paymentTransactions.push({
-      id: nextIds.payment++, bookingId, userId: parseInt(userId || 0),
-      amount, phone, provider, status: 'pending',
-      azamTransactionId: txnId, externalId: txRef, mode: 'flutterwave',
-      createdAt: new Date().toISOString()
-    });
+    await pool.query(
+      `INSERT INTO payment_transactions (booking_id, user_id, amount, phone, provider, status, azam_transaction_id, external_id, mode)
+       VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,'flutterwave')`,
+      [bookingId || null, parseInt(userId || 0), amount, phone, provider, txnId, txRef]
+    );
     res.json({ success: true, transactionId: txnId, status: 'pending', message: payRes.data?.message || ('Confirm kwenye simu yako ' + phone) });
 
   } catch (err) {
-    // Fallback kwa simulation kama connection inashindwa
     console.error('[Flutterwave Error]', err.message);
     const txnId = `TXN${Date.now()}`;
-    paymentTransactions.push({
-      id: nextIds.payment++, bookingId, userId: parseInt(userId || 0),
-      amount, phone, provider, status: 'pending',
-      azamTransactionId: txnId, externalId: txRef, mode: 'simulation',
-      createdAt: new Date().toISOString()
-    });
+    await pool.query(
+      `INSERT INTO payment_transactions (booking_id, user_id, amount, phone, provider, status, azam_transaction_id, external_id, mode)
+       VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,'simulation')`,
+      [bookingId || null, parseInt(userId || 0), amount, phone, provider, txnId, txRef]
+    );
     res.json({ success: true, transactionId: txnId, status: 'pending', message: 'STK Push imetumwa! Weka PIN yako.' });
   }
 });
 
 // Flutterwave inatuma webhook hapa baada ya malipo kukamilika
-app.post('/api/payment/callback', (req, res) => {
+app.post('/api/payment/callback', async (req, res) => {
   const signature = req.headers['verif-hash'];
   if (FLW.webhookHash && signature !== FLW.webhookHash) return res.status(401).json({ error: 'Invalid signature' });
 
   const payload = req.body;
   console.log('[Flutterwave Webhook]', JSON.stringify(payload));
-  const txn = paymentTransactions.find(t => t.azamTransactionId === String(payload.data?.id) || t.externalId === payload.data?.tx_ref);
-  if (txn) {
-    txn.status = payload.data?.status === 'successful' ? 'completed' : 'failed';
-    txn.completedAt = new Date().toISOString();
-    if (txn.status === 'completed' && txn.bookingId) {
-      const booking = bookings.find(b => b.id === txn.bookingId);
-      if (booking) booking.status = 'confirmed';
-    }
+  const txnId = String(payload.data?.id);
+  const status = payload.data?.status === 'successful' ? 'completed' : 'failed';
+
+  const { rows } = await pool.query(
+    `UPDATE payment_transactions SET status=$1, completed_at=NOW()
+     WHERE azam_transaction_id=$2 OR external_id=$3 RETURNING *`,
+    [status, txnId, payload.data?.tx_ref]
+  );
+  const txn = rows[0];
+  if (txn && status === 'completed' && txn.booking_id) {
+    await pool.query(`UPDATE bookings SET status='confirmed' WHERE id=$1`, [txn.booking_id]);
   }
   res.json({ success: true });
 });
@@ -310,18 +384,18 @@ app.post('/api/payment/callback', (req, res) => {
 // Manual confirm (mtumiaji anabonyeza "Confirm Payment" kwenye app)
 app.post('/api/payment/confirm', async (req, res) => {
   const { transactionId } = req.body;
-  const txn = paymentTransactions.find(t => t.azamTransactionId === transactionId);
+  const { rows } = await pool.query('SELECT * FROM payment_transactions WHERE azam_transaction_id=$1', [transactionId]);
+  const txn = rows[0];
   if (!txn) return res.json({ success: false, message: 'Transaction haikupatikana' });
 
   if (txn.mode === 'flutterwave' && FLW.secretKey) {
     try {
       const verify = await verifyFlutterwaveTransaction(transactionId);
-      const status = verify?.data?.status;
-      txn.status = status === 'successful' ? 'completed' : 'pending';
-      txn.completedAt = new Date().toISOString();
+      const status = verify?.data?.status === 'successful' ? 'completed' : 'pending';
+      await pool.query(`UPDATE payment_transactions SET status=$1, completed_at=NOW() WHERE id=$2`, [status, txn.id]);
       return res.json({
-        success: true, status: txn.status,
-        message: txn.status === 'completed'
+        success: true, status,
+        message: status === 'completed'
           ? 'Malipo yamethibitishwa! Fedha zimehifadhiwa katika Escrow ya StayLocal.'
           : 'Malipo bado hayajakamilika - thibitisha kwenye simu yako kisha jaribu tena.'
       });
@@ -329,113 +403,128 @@ app.post('/api/payment/confirm', async (req, res) => {
       console.error('[Flutterwave Verify Error]', err.message);
     }
   }
-  txn.status = 'completed'; txn.completedAt = new Date().toISOString();
+  await pool.query(`UPDATE payment_transactions SET status='completed', completed_at=NOW() WHERE id=$1`, [txn.id]);
   res.json({ success: true, status: 'completed', message: 'Malipo yamethibitishwa! Fedha zimehifadhiwa katika Escrow ya StayLocal.' });
 });
 
 // ─── SUPER ADMIN STATS ────────────────────────────────────────
-app.get('/api/admin/stats', (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+app.get('/api/admin/stats', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  const confirmedBookings = bookings.filter(b => b.status === 'confirmed');
-  const cancelledBookings = bookings.filter(b => b.status === 'cancelled');
-  const checkedInBookings = bookings.filter(b => b.status === 'checked-in');
-  const pendingBookings   = bookings.filter(b => b.status === 'pending');
+    const { rows: bookingRows } = await pool.query('SELECT * FROM bookings ORDER BY id DESC');
+    const { rows: userRows } = await pool.query('SELECT * FROM users ORDER BY id');
+    const { rows: logRows } = await pool.query('SELECT * FROM login_logs ORDER BY timestamp DESC LIMIT 200');
+    const { rows: txnRows } = await pool.query('SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 100');
+    const { rows: propRows } = await pool.query('SELECT id, host_id, host_name FROM properties');
 
-  const totalRevenue = confirmedBookings.reduce((a, b) => a + (b.serviceFee || 0), 0);
-  const totalBookingValue = confirmedBookings.reduce((a, b) => a + (b.total || 0), 0);
+    const confirmedBookings = bookingRows.filter(b => b.status === 'confirmed');
+    const cancelledBookings = bookingRows.filter(b => b.status === 'cancelled');
+    const checkedInBookings = bookingRows.filter(b => b.status === 'checked-in');
+    const pendingBookings   = bookingRows.filter(b => b.status === 'pending');
 
-  const todayLogins  = loginLogs.filter(l => l.timestamp.startsWith(today));
-  const weekLogins   = loginLogs.filter(l => l.timestamp >= weekAgo);
-  const newUsersThisWeek = users.filter(u => u.createdAt >= weekAgo.split('T')[0]).length;
+    const totalRevenue = confirmedBookings.reduce((a, b) => a + (b.service_fee || 0), 0);
+    const totalBookingValue = confirmedBookings.reduce((a, b) => a + (b.total || 0), 0);
 
-  // Bookings grouped by landlord
-  const landlordMap = {};
-  bookings.forEach(b => {
-    const prop = properties.find(p => p.id === b.propertyId);
-    const key = b.hostId || (prop?.hostId);
-    if (!key) return;
-    if (!landlordMap[key]) {
-      landlordMap[key] = {
-        landlordId: key,
-        landlordName: b.hostName || prop?.hostName || 'Unknown',
-        email: users.find(u => u.id === key)?.email || '',
-        totalBookings: 0, confirmedBookings: 0, cancelledBookings: 0,
-        revenue: 0, bookingValue: 0,
-        propertyIds: new Set(),
+    const todayLogins = logRows.filter(l => l.timestamp.toISOString().startsWith(today));
+    const weekLogins  = logRows.filter(l => l.timestamp >= weekAgo);
+    const newUsersThisWeek = userRows.filter(u => new Date(u.created_at) >= weekAgo).length;
+
+    // Bookings grouped by landlord
+    const landlordMap = {};
+    bookingRows.forEach(b => {
+      const prop = propRows.find(p => p.id === b.property_id);
+      const key = b.host_id || prop?.host_id;
+      if (!key) return;
+      if (!landlordMap[key]) {
+        landlordMap[key] = {
+          landlordId: key,
+          landlordName: b.host_name || prop?.host_name || 'Unknown',
+          email: userRows.find(u => u.id === key)?.email || '',
+          totalBookings: 0, confirmedBookings: 0, cancelledBookings: 0,
+          revenue: 0, bookingValue: 0,
+          propertyIds: new Set(),
+        };
+      }
+      landlordMap[key].totalBookings++;
+      landlordMap[key].propertyIds.add(b.property_id);
+      if (b.status === 'confirmed') { landlordMap[key].confirmedBookings++; landlordMap[key].revenue += (b.service_fee || 0); landlordMap[key].bookingValue += (b.total || 0); }
+      if (b.status === 'cancelled') landlordMap[key].cancelledBookings++;
+    });
+    const bookingsByLandlord = Object.values(landlordMap).map(l => ({
+      ...l, propertyCount: l.propertyIds.size, propertyIds: Array.from(l.propertyIds)
+    }));
+
+    const enrichedBookings = bookingRows.map(b => {
+      const guest = userRows.find(u => u.id === b.user_id);
+      return { ...mapBooking(b), guestName: guest?.name || 'Unknown', guestEmail: guest?.email || '' };
+    });
+
+    const enrichedUsers = userRows.map(u => {
+      const userLogs = logRows.filter(l => l.user_id === u.id);
+      const lastLogin = userLogs.slice().sort((a, b) => b.timestamp - a.timestamp)[0]?.timestamp;
+      return {
+        ...mapUser(u),
+        loginCount: userLogs.filter(l => l.event === 'login').length,
+        lastLogin: lastLogin ? lastLogin.toISOString() : null,
+        totalBookings: bookingRows.filter(b => b.user_id === u.id).length,
       };
-    }
-    landlordMap[key].totalBookings++;
-    landlordMap[key].propertyIds.add(b.propertyId);
-    if (b.status === 'confirmed') { landlordMap[key].confirmedBookings++; landlordMap[key].revenue += (b.serviceFee || 0); landlordMap[key].bookingValue += (b.total || 0); }
-    if (b.status === 'cancelled') landlordMap[key].cancelledBookings++;
-  });
+    });
 
-  const bookingsByLandlord = Object.values(landlordMap).map(l => ({
-    ...l, propertyCount: l.propertyIds.size, propertyIds: Array.from(l.propertyIds)
-  }));
-
-  // Enrich bookings with guest and host names
-  const enrichedBookings = bookings.map(b => {
-    const prop  = properties.find(p => p.id === b.propertyId);
-    const guest = users.find(u => u.id === b.userId);
-    return {
-      ...b,
-      guestName: guest?.name || 'Unknown',
-      guestEmail: guest?.email || '',
-      propertyLocation: prop?.location || '',
-    };
-  });
-
-  // Enrich users with login stats
-  const enrichedUsers = users.map(u => {
-    const { password: _, ...safe } = u;
-    const userLogs = loginLogs.filter(l => l.userId === u.id);
-    const lastLogin = userLogs.sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0]?.timestamp;
-    return { ...safe, loginCount: userLogs.filter(l => l.event === 'login').length, lastLogin, totalBookings: bookings.filter(b => b.userId === u.id).length };
-  });
-
-  res.json({
-    overview: {
-      totalUsers: users.length,
-      totalGuests: users.filter(u => u.role === 'guest').length,
-      totalHosts: users.filter(u => u.role === 'host').length,
-      newUsersThisWeek,
-      totalBookings: bookings.length,
-      confirmedBookings: confirmedBookings.length,
-      cancelledBookings: cancelledBookings.length,
-      checkedInBookings: checkedInBookings.length,
-      pendingBookings: pendingBookings.length,
-      totalProperties: properties.length,
-      totalRevenue,
-      totalBookingValue,
-      todayLogins: todayLogins.length,
-      weekLogins: weekLogins.length,
-    },
-    users: enrichedUsers,
-    bookings: enrichedBookings,
-    loginLogs: loginLogs.slice().reverse().slice(0, 100),
-    bookingsByLandlord,
-    paymentTransactions: paymentTransactions.slice().reverse().slice(0, 100),
-  });
+    res.json({
+      overview: {
+        totalUsers: userRows.length,
+        totalGuests: userRows.filter(u => u.role === 'guest').length,
+        totalHosts: userRows.filter(u => u.role === 'host').length,
+        newUsersThisWeek,
+        totalBookings: bookingRows.length,
+        confirmedBookings: confirmedBookings.length,
+        cancelledBookings: cancelledBookings.length,
+        checkedInBookings: checkedInBookings.length,
+        pendingBookings: pendingBookings.length,
+        totalProperties: propRows.length,
+        totalRevenue,
+        totalBookingValue,
+        todayLogins: todayLogins.length,
+        weekLogins: weekLogins.length,
+      },
+      users: enrichedUsers,
+      bookings: enrichedBookings,
+      loginLogs: logRows.map(mapLoginLog),
+      bookingsByLandlord,
+      paymentTransactions: txnRows.map(mapTransaction),
+    });
+  } catch (err) {
+    console.error('[Admin Stats Error]', err.message);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // ─── GENERAL STATS ────────────────────────────────────────────
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', async (req, res) => {
+  const { rows: [{ count: totalProperties }] } = await pool.query('SELECT COUNT(*) FROM properties');
+  const { rows: [{ count: totalBookings }] } = await pool.query('SELECT COUNT(*) FROM bookings');
+  const { rows: [{ count: totalUsers }] } = await pool.query('SELECT COUNT(*) FROM users');
+  const { rows: [{ count: verifiedProperties }] } = await pool.query('SELECT COUNT(*) FROM properties WHERE verified=true');
+  const { rows: [{ avg: avgRating }] } = await pool.query('SELECT AVG(rating) FROM properties');
   res.json({
-    totalProperties: properties.length,
-    totalBookings: bookings.length,
-    totalUsers: users.length,
-    verifiedProperties: properties.filter(p => p.verified).length,
-    avgRating: (properties.reduce((a, p) => a + p.rating, 0) / properties.length).toFixed(1)
+    totalProperties: parseInt(totalProperties), totalBookings: parseInt(totalBookings), totalUsers: parseInt(totalUsers),
+    verifiedProperties: parseInt(verifiedProperties), avgRating: avgRating ? parseFloat(avgRating).toFixed(1) : '0.0',
   });
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  const hasCreds = !!FLW.secretKey;
+app.listen(PORT, async () => {
   console.log(`\n✓ StayLocal API running on http://localhost:${PORT}`);
+  try {
+    await pool.query('SELECT 1');
+    console.log('✓ PostgreSQL connected');
+  } catch (err) {
+    console.error('✗ PostgreSQL connection FAILED:', err.message);
+    console.error('  Angalia DATABASE_URL kwenye .env, na uwe umerun: npm run db:migrate');
+  }
+  const hasCreds = !!FLW.secretKey;
   console.log(`\n─── Flutterwave Status ─────────────────────────`);
   console.log(`  Mode:        ${hasCreds ? '✓ SANDBOX (real API)' : '⚠ SIMULATION (no credentials)'}`);
   console.log(`  Base URL:    ${FLW.baseUrl}`);
