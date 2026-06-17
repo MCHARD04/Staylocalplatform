@@ -795,13 +795,17 @@ function PropertyPage({ prop, saved, toggleSaved, user, bookings, setBookings, s
   const handleConfirm = async () => {
     setLoading(true);
     try {
-      await fetch("/api/payment/confirm", {
+      const cRes = await fetch("/api/payment/confirm", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ transactionId: txnId }),
       });
+      const cData = await cRes.json();
+      if (!cData.success) { showToast(cData.message||"Malipo bado hayajakamilika, jaribu tena","error"); setLoading(false); return; }
+      if (cData.status === "pending") { showToast(cData.message||"Malipo bado hayajakamilika kwenye simu yako","error"); setLoading(false); return; }
+
       const bRes = await fetch("/api/bookings", {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ userId: user?.id, propertyId: prop.id, checkIn, checkOut, guests, paymentMethod }),
+        body: JSON.stringify({ userId: user?.id, propertyId: prop.id, checkIn, checkOut, guests, paymentMethod: payMethod }),
       });
       const bData = await bRes.json();
       if (bData.success) {
@@ -809,7 +813,7 @@ function PropertyPage({ prop, saved, toggleSaved, user, bookings, setBookings, s
         setStep("success");
         showToast("Booking imethibitishwa! Asante kwa kutumia StayLocal!");
       } else showToast("Tatizo la booking, wasiliana na support","error");
-    } catch { showToast("Tatizo la network, jaribu tena","error"); }
+    } catch (err) { console.error("[handleConfirm]", err); showToast("Tatizo: "+err.message,"error"); }
     setLoading(false);
   };
   const submitReview = () => {
