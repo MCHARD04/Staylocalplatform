@@ -14,32 +14,19 @@ app.get('*', (req, res, next) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-// ─── AZAMPESA CONFIG ─────────────────────────────────────────
+// ─── FLUTTERWAVE CONFIG ───────────────────────────────────────
 // HATUA ZA KUPATA CREDENTIALS:
-// 1. Nenda https://www.azampesa.co.tz na uchague "Become a Merchant"
-// 2. Jaza fomu ya merchant registration (business details, NIN, TIN)
-// 3. Baada ya approval (siku 1-3), login kwenye merchant portal
-// 4. Nenda Settings > API Credentials - utapata AppName, ClientID, ClientSecret, VendorID
-// 5. Kwa majaribio (sandbox): tumia https://sandbox.azampesa.co.tz
-// 6. Kwa production: tumia https://pesapaapi.azampesa.co.tz
-// 7. Weka credentials kwenye .env file (copy .env.example kwanza)
-const AZAM = {
-  appName:      process.env.AZAM_APP_NAME      || 'StayLocal',
-  clientId:     process.env.AZAM_CLIENT_ID     || '',
-  clientSecret: process.env.AZAM_CLIENT_SECRET || '',
-  vendorId:     process.env.AZAM_VENDOR_ID     || '',
-  authUrl:      process.env.AZAM_AUTH_URL      || 'https://authenticator-sandbox.azampay.co.tz',
-  checkoutUrl:  process.env.AZAM_CHECKOUT_URL  || 'https://sandbox.azampay.co.tz',
-  callbackUrl:  process.env.AZAM_CALLBACK_URL  || 'http://localhost:3001/api/payment/callback',
-};
-
-// PROVIDER CODES ZA AZAMPESA API
-const PROVIDER_MAP = {
-  'AZAMPESA': 'AZAMPESA', 'AzamPesa': 'AZAMPESA',
-  'M-Pesa': 'MPESA', 'MPESA': 'MPESA',
-  'Tigo Pesa': 'TIGOPESA', 'TIGOPESA': 'TIGOPESA',
-  'Airtel Money': 'AIRTELMONEY', 'AIRTELMONEY': 'AIRTELMONEY',
-  'HaloPesa': 'HALOPESA', 'HALOPESA': 'HALOPESA',
+// 1. Nenda https://dashboard.flutterwave.com/signup na ujisajili
+// 2. Baada ya kuingia, nenda Settings > API Keys
+// 3. Test keys zinafanya kazi MARA MOJA - hauhitaji activation/approval
+// 4. Nakili "Test Secret Key" (FLWSECK_TEST-...) na weka kwenye .env
+// 5. Production: badilisha na "Live Secret Key" baada ya KYC verification
+const FLW = {
+  secretKey:   process.env.FLW_SECRET_KEY   || '',
+  publicKey:   process.env.FLW_PUBLIC_KEY   || '',
+  baseUrl:     process.env.FLW_BASE_URL     || 'https://api.flutterwave.com/v3',
+  redirectUrl: process.env.FLW_REDIRECT_URL || 'http://localhost:3001/api/payment/callback',
+  webhookHash: process.env.FLW_WEBHOOK_HASH || '',
 };
 
 // ─── IN-MEMORY DATA ──────────────────────────────────────────
@@ -104,23 +91,11 @@ function makeRequest(url, method, body, headers) {
   });
 }
 
-async function getAzamToken() {
-  try {
-    const res = await makeRequest(`${AZAM.authUrl}/api/token`, 'POST', {
-      appName:      AZAM.appName,
-      clientId:     AZAM.clientId,
-      clientSecret: AZAM.clientSecret,
-    });
-    console.log('[AzamPay] Token response:', JSON.stringify(res.data));
-    // AzamPay returns token at data.accessToken or data.token
-    return res.data?.data?.accessToken
-        || res.data?.accessToken
-        || res.data?.token
-        || null;
-  } catch (err) {
-    console.error('[AzamPay] Token error:', err.message);
-    return null;
-  }
+async function verifyFlutterwaveTransaction(id) {
+  const res = await makeRequest(`${FLW.baseUrl}/transactions/${id}/verify`, 'GET', null, {
+    'Authorization': `Bearer ${FLW.secretKey}`,
+  });
+  return res.data;
 }
 
 // ─── AUTH ENDPOINTS ───────────────────────────────────────────
@@ -244,8 +219,8 @@ app.post('/api/reviews', (req, res) => {
 
 // ─── PAYMENT INITIATE (Mobile Money + Card) ───────────────────
 app.post('/api/payment/initiate', async (req, res) => {
-  const { bookingId, userId, amount, phone, provider = 'AzamPesa', cardNum, cardName, cardExpiry, cardBrand } = req.body;
-  const externalId = `staylocal-${userId}-${Date.now()}`;
+  const { bookingId, userId, amount, phone, provider = 'AzamPesa', cardNum, cardName, cardExpiry, cardBrand, email, fullname } = req.body;
+  const txRef = `staylocal-${userId}-${Date.now()}`;
   const isCard = provider === 'CARD';
 
   // ── CARD PAYMENT ──────────────────────────────────────────────
@@ -257,77 +232,72 @@ app.post('/api/payment/initiate', async (req, res) => {
       amount, phone: null, provider: cardBrand || 'CARD',
       cardLast4: last4, cardName, cardExpiry,
       status: 'completed', azamTransactionId: txnId,
-      externalId, mode: 'card', createdAt: new Date().toISOString()
+      externalId: txRef, mode: 'card', createdAt: new Date().toISOString()
     });
     return res.json({ success: true, transactionId: txnId, status: 'completed', message: `Kadi ****${last4} imethibitishwa` });
   }
 
-  const providerCode = PROVIDER_MAP[provider] || 'AZAMPESA';
-
   // Kama credentials hazijawekwa, simulate kwa majaribio
-  if (!AZAM.clientId || !AZAM.clientSecret) {
+  if (!FLW.secretKey) {
     const txnId = `TXN${Date.now()}`;
     paymentTransactions.push({
       id: nextIds.payment++, bookingId, userId: parseInt(userId || 0),
-      amount, phone, provider: providerCode, status: 'pending',
-      azamTransactionId: txnId, externalId, mode: 'simulation',
+      amount, phone, provider, status: 'pending',
+      azamTransactionId: txnId, externalId: txRef, mode: 'simulation',
       createdAt: new Date().toISOString()
     });
     return res.json({ success: true, transactionId: txnId, status: 'pending', message: 'STK Push imetumwa! Weka PIN yako ya ' + provider });
   }
 
   try {
-    // Pata token ya AzamPesa
-    const token = await getAzamToken();
-    if (!token) throw new Error('Token haikupatikana');
-
-    // Tuma ombi la malipo
-    const payRes = await makeRequest(`${AZAM.checkoutUrl}/api/payment`, 'POST', {
-      appName: AZAM.appName,
-      clientId: AZAM.clientId,
-      clientSecret: AZAM.clientSecret,
-      vendorId: AZAM.vendorId,
-      languageCode: 'SW',
-      currency: 'TZS',
-      countryCode: 'TZ',
+    // Flutterwave inaautomatically detect mtandao (Vodacom/Tigo/Airtel/Halo) kutoka namba ya simu
+    const payRes = await makeRequest(`${FLW.baseUrl}/charges?type=mobile_money_tanzania`, 'POST', {
+      tx_ref: txRef,
       amount: String(amount),
-      provider: providerCode,
-      transferType: 'COLLECTION',
-      accountNumber: phone.replace(/[\s\-]/g, ''),
-      externalId,
-      callBackUrl: AZAM.callbackUrl,
-    }, { 'Authorization': `Bearer ${token}` });
+      currency: 'TZS',
+      email: email || 'guest@staylocal.co.tz',
+      phone_number: phone.replace(/[\s\-]/g, ''),
+      fullname: fullname || 'StayLocal Guest',
+      redirect_url: FLW.redirectUrl,
+    }, { 'Authorization': `Bearer ${FLW.secretKey}` });
 
-    const txnId = payRes.data?.transactionId || externalId;
+    console.log('[Flutterwave] Charge response:', JSON.stringify(payRes.data));
+
+    if (payRes.data?.status !== 'success') throw new Error(payRes.data?.message || 'Flutterwave charge failed');
+
+    const txnId = String(payRes.data?.data?.id || txRef);
     paymentTransactions.push({
       id: nextIds.payment++, bookingId, userId: parseInt(userId || 0),
-      amount, phone, provider: providerCode, status: 'pending',
-      azamTransactionId: txnId, externalId, mode: 'live',
+      amount, phone, provider, status: 'pending',
+      azamTransactionId: txnId, externalId: txRef, mode: 'flutterwave',
       createdAt: new Date().toISOString()
     });
-    res.json({ success: true, transactionId: txnId, status: 'pending', message: 'STK Push imetumwa kwa ' + phone + '! Weka PIN yako.' });
+    res.json({ success: true, transactionId: txnId, status: 'pending', message: payRes.data?.message || ('Confirm kwenye simu yako ' + phone) });
 
   } catch (err) {
     // Fallback kwa simulation kama connection inashindwa
-    console.error('[AzamPesa Error]', err.message);
+    console.error('[Flutterwave Error]', err.message);
     const txnId = `TXN${Date.now()}`;
     paymentTransactions.push({
       id: nextIds.payment++, bookingId, userId: parseInt(userId || 0),
-      amount, phone, provider: providerCode, status: 'pending',
-      azamTransactionId: txnId, externalId, mode: 'simulation',
+      amount, phone, provider, status: 'pending',
+      azamTransactionId: txnId, externalId: txRef, mode: 'simulation',
       createdAt: new Date().toISOString()
     });
     res.json({ success: true, transactionId: txnId, status: 'pending', message: 'STK Push imetumwa! Weka PIN yako.' });
   }
 });
 
-// AzamPesa inatuma callback hapa baada ya mtumiaji kuweka PIN
+// Flutterwave inatuma webhook hapa baada ya malipo kukamilika
 app.post('/api/payment/callback', (req, res) => {
-  const { transactionId, externalId, status } = req.body;
-  console.log('[AzamPesa Callback]', req.body);
-  const txn = paymentTransactions.find(t => t.azamTransactionId === transactionId || t.externalId === externalId);
+  const signature = req.headers['verif-hash'];
+  if (FLW.webhookHash && signature !== FLW.webhookHash) return res.status(401).json({ error: 'Invalid signature' });
+
+  const payload = req.body;
+  console.log('[Flutterwave Webhook]', JSON.stringify(payload));
+  const txn = paymentTransactions.find(t => t.azamTransactionId === String(payload.data?.id) || t.externalId === payload.data?.tx_ref);
   if (txn) {
-    txn.status = (status === 'COMPLETED' || status === 'SUCCESS') ? 'completed' : 'failed';
+    txn.status = payload.data?.status === 'successful' ? 'completed' : 'failed';
     txn.completedAt = new Date().toISOString();
     if (txn.status === 'completed' && txn.bookingId) {
       const booking = bookings.find(b => b.id === txn.bookingId);
@@ -338,10 +308,28 @@ app.post('/api/payment/callback', (req, res) => {
 });
 
 // Manual confirm (mtumiaji anabonyeza "Confirm Payment" kwenye app)
-app.post('/api/payment/confirm', (req, res) => {
+app.post('/api/payment/confirm', async (req, res) => {
   const { transactionId } = req.body;
   const txn = paymentTransactions.find(t => t.azamTransactionId === transactionId);
-  if (txn) { txn.status = 'completed'; txn.completedAt = new Date().toISOString(); }
+  if (!txn) return res.json({ success: false, message: 'Transaction haikupatikana' });
+
+  if (txn.mode === 'flutterwave' && FLW.secretKey) {
+    try {
+      const verify = await verifyFlutterwaveTransaction(transactionId);
+      const status = verify?.data?.status;
+      txn.status = status === 'successful' ? 'completed' : 'pending';
+      txn.completedAt = new Date().toISOString();
+      return res.json({
+        success: true, status: txn.status,
+        message: txn.status === 'completed'
+          ? 'Malipo yamethibitishwa! Fedha zimehifadhiwa katika Escrow ya StayLocal.'
+          : 'Malipo bado hayajakamilika - thibitisha kwenye simu yako kisha jaribu tena.'
+      });
+    } catch (err) {
+      console.error('[Flutterwave Verify Error]', err.message);
+    }
+  }
+  txn.status = 'completed'; txn.completedAt = new Date().toISOString();
   res.json({ success: true, status: 'completed', message: 'Malipo yamethibitishwa! Fedha zimehifadhiwa katika Escrow ya StayLocal.' });
 });
 
@@ -446,14 +434,13 @@ app.get('/api/stats', (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  const hasCreds = AZAM.clientId && AZAM.clientId !== 'WEKA_CLIENT_ID_YAKO_HAPA';
+  const hasCreds = !!FLW.secretKey;
   console.log(`\n✓ StayLocal API running on http://localhost:${PORT}`);
-  console.log(`\n─── AzamPesa Status ───────────────────────────`);
+  console.log(`\n─── Flutterwave Status ─────────────────────────`);
   console.log(`  Mode:        ${hasCreds ? '✓ SANDBOX (real API)' : '⚠ SIMULATION (no credentials)'}`);
-  console.log(`  Auth URL:     ${AZAM.authUrl}`);
-  console.log(`  Checkout URL: ${AZAM.checkoutUrl}`);
-  console.log(`  Callback:    ${AZAM.callbackUrl}`);
-  console.log(`  Credentials: ${hasCreds ? '✓ SET' : '✗ NOT SET — weka kwenye .env'}`);
+  console.log(`  Base URL:    ${FLW.baseUrl}`);
+  console.log(`  Redirect:    ${FLW.redirectUrl}`);
+  console.log(`  Credentials: ${hasCreds ? '✓ SET' : '✗ NOT SET — weka FLW_SECRET_KEY kwenye .env'}`);
   console.log(`───────────────────────────────────────────────\n`);
 });
 module.exports = app;

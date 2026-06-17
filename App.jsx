@@ -781,7 +781,7 @@ function PropertyPage({ prop, saved, toggleSaved, user, bookings, setBookings, s
     try {
       const body = isCard
         ? { userId: user?.id, amount: total, provider: "CARD", cardNum: cardNum.replace(/\s/g,''), cardName, cardExpiry, cardBrand: cardBrand(cardNum) }
-        : { userId: user?.id, amount: total, phone, provider: payMethod };
+        : { userId: user?.id, amount: total, phone, provider: payMethod, email: user?.email, fullname: user?.name };
       const res = await fetch("/api/payment/initiate", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify(body),
@@ -1960,7 +1960,7 @@ function AdminPaymentsTab({ transactions, overview }) {
                   <td style={{ padding:"11px 14px", fontWeight:700, color:C.primary, whiteSpace:"nowrap" }}>TZS {fmt(t.amount)}</td>
                   <td style={{ padding:"11px 14px", color:C.dark }}>{t.phone||"—"}</td>
                   <td style={{ padding:"11px 14px" }}><span style={{ fontSize:".72rem", background:C.bg, padding:"2px 9px", borderRadius:8, color:C.brown, fontWeight:600 }}>{t.provider||"—"}</span></td>
-                  <td style={{ padding:"11px 14px" }}><span style={{ fontSize:".68rem", padding:"2px 8px", borderRadius:8, background:t.mode==="live"?"#DCFCE7":"#FEF3C7", color:t.mode==="live"?C.success:C.warning, fontWeight:700 }}>{t.mode==="live"?"LIVE":"SANDBOX"}</span></td>
+                  <td style={{ padding:"11px 14px" }}><span style={{ fontSize:".68rem", padding:"2px 8px", borderRadius:8, background:t.mode==="flutterwave"?"#DCFCE7":t.mode==="card"?"#EFF6FF":"#FEF3C7", color:t.mode==="flutterwave"?C.success:t.mode==="card"?"#2563EB":C.warning, fontWeight:700 }}>{t.mode==="flutterwave"?"FLUTTERWAVE":t.mode==="card"?"CARD":"SANDBOX"}</span></td>
                   <td style={{ padding:"11px 14px" }}>{statusBadge(t.status)}</td>
                   <td style={{ padding:"11px 14px", color:C.muted, fontSize:".72rem", whiteSpace:"nowrap" }}>{t.createdAt?new Date(t.createdAt).toLocaleString("sw-TZ",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"—"}</td>
                 </tr>
